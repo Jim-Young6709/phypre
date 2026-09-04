@@ -29,10 +29,18 @@ from pathlib import Path
 
 import numpy as np
 import viser
-from molmo_spaces.utils.grasps import get_pickup_grasp_path
-from molmo_spaces.utils.object_metadata import ObjectMeta
-from molmo_spaces.utils.object_retriever import ObjectRetriever
 from pxr import Gf, Usd, UsdGeom
+
+try:
+    from molmo_spaces.utils.grasps import get_pickup_grasp_path
+    from molmo_spaces.utils.object_metadata import ObjectMeta
+    from molmo_spaces.utils.object_retriever import ObjectRetriever
+except ModuleNotFoundError as exc:
+    if exc.name != "molmo_spaces" and not exc.name.startswith("molmo_spaces."):
+        raise
+    get_pickup_grasp_path = None
+    ObjectMeta = None
+    ObjectRetriever = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -603,12 +611,13 @@ def list_asset_grasp_files(asset_id: str, args: argparse.Namespace) -> list[Path
             if custom_path.is_file():
                 files.append(custom_path)
 
-    try:
-        pickup_path = Path(get_pickup_grasp_path(asset_id, grasp_libraries=[args.grasp_source]))
-        if pickup_path.is_file():
-            files.append(pickup_path)
-    except Exception:
-        pass
+    if get_pickup_grasp_path is not None:
+        try:
+            pickup_path = Path(get_pickup_grasp_path(asset_id, grasp_libraries=[args.grasp_source]))
+            if pickup_path.is_file():
+                files.append(pickup_path)
+        except Exception:
+            pass
 
     def sort_key(path: Path) -> tuple[int, str]:
         is_pickup = path.name in {f"{asset_id}_grasps_filtered.npz", "grasps.npz"}
@@ -807,7 +816,7 @@ class MolmoViserViewer:
         self.current_object_name = initial_object_name(args, self.objects)
         self.scene_handle = None
         self.object_handle = None
-        self.object_bbox_handle = None
+        self.object_bbox_handles: list[object] = []
         self.scene_mesh: MeshData | None = None
         self.object_mesh: MeshData | None = None
         self.object_to_viser: np.ndarray | None = None
@@ -823,7 +832,7 @@ class MolmoViserViewer:
         self.server = viser.ViserServer(host=args.host, port=args.port)
         self.server.gui.configure_theme(control_width="large")
         self.server.scene.add_frame("/axes", show_axes=True, axes_length=0.25, axes_radius=0.01)
-        self.server.scene.add_grid("/grid", width=8.0, height=8.0, cell_size=0.25, section_size=1.0, shadow_opacity=0.2)
+        self.server.scene.add_grid("/grid", width=8.0, height=8.0, cell_size=0.25, section_size=1.0)
 
         self._build_gui()
 
@@ -947,14 +956,14 @@ class MolmoViserViewer:
             visible = bool(self.show_object.value)
             if self.object_handle is not None:
                 self.object_handle.visible = visible
-            if self.object_bbox_handle is not None:
-                self.object_bbox_handle.visible = visible and bool(self.show_bbox.value)
+            for handle in self.object_bbox_handles:
+                handle.visible = visible and bool(self.show_bbox.value)
             self.set_grasp_visibility()
 
         @self.show_bbox.on_update
         def _(_: object) -> None:
-            if self.object_bbox_handle is not None:
-                self.object_bbox_handle.visible = bool(self.show_bbox.value) and bool(self.show_object.value)
+            for handle in self.object_bbox_handles:
+                handle.visible = bool(self.show_bbox.value) and bool(self.show_object.value)
 
         @self.adjust_view_btn.on_click
         def _(_: object) -> None:
@@ -983,6 +992,14 @@ class MolmoViserViewer:
             handle.remove()
         finally:
             setattr(self, attr_name, None)
+
+    def clear_object_bbox(self) -> None:
+        for handle in self.object_bbox_handles:
+            try:
+                handle.remove()
+            except Exception:
+                pass
+        self.object_bbox_handles = []
 
     def clear_grasps(self) -> None:
         for handle in self.grasp_handles:
@@ -1059,8 +1076,6 @@ class MolmoViserViewer:
                 faces=mesh.faces,
                 color=(185, 188, 194),
                 opacity=0.95,
-                cast_shadow=False,
-                receive_shadow=True,
                 flat_shading=False,
                 side="double",
             )
@@ -1098,7 +1113,7 @@ class MolmoViserViewer:
             )
 
             self.remove_handle("object_handle")
-            self.remove_handle("object_bbox_handle")
+            self.clear_object_bbox()
             self.clear_grasps()
             self.object_handle = self.server.scene.add_mesh_simple(
                 "/molmo/object",
@@ -1106,21 +1121,23 @@ class MolmoViserViewer:
                 faces=mesh.faces,
                 color=(240, 135, 45),
                 opacity=1.0,
-                cast_shadow=False,
-                receive_shadow=True,
                 flat_shading=False,
                 side="double",
             )
             edges, colors = bbox_edges(mesh)
-            self.object_bbox_handle = self.server.scene.add_line_segments(
-                "/molmo/object_bbox",
-                points=edges,
-                colors=colors,
-                line_width=2.0,
-            )
+            for edge_idx, (edge, color) in enumerate(zip(edges, colors, strict=True)):
+                self.object_bbox_handles.append(
+                    self.server.scene.add_spline_catmull_rom(
+                        f"/molmo/object_bbox/{edge_idx:02d}",
+                        positions=edge,
+                        color=tuple(int(channel) for channel in color[0]),
+                        line_width=2.0,
+                    )
+                )
             visible = bool(self.show_object.value)
             self.object_handle.visible = visible
-            self.object_bbox_handle.visible = visible and bool(self.show_bbox.value)
+            for handle in self.object_bbox_handles:
+                handle.visible = visible and bool(self.show_bbox.value)
             self.object_mesh = mesh
             self.object_to_viser = object_to_viser
             self.loaded_object_name = object_name
@@ -1272,6 +1289,12 @@ class MolmoViserViewer:
     def search_and_load_object(self, query: str) -> None:
         if not query:
             self.set_status("Enter an object query first.")
+            return
+        if ObjectRetriever is None or ObjectMeta is None:
+            self.set_status(
+                "Object text search requires `molmo_spaces`. "
+                "Use the local object selector or pass `--asset-id`/`--object` instead."
+            )
             return
         try:
             retriever = ObjectRetriever(max_results=25)

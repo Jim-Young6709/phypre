@@ -62,7 +62,7 @@ class FrankaBaseEnv(DirectRLEnv):
     def _setup_scene(self) -> None:
         self.robot = Articulation(self.cfg.robot_cfg)
         spawn_ground_plane(prim_path=self.cfg.ground_prim_path, cfg=GroundPlaneCfg())
-        self.scene.clone_environments(copy_from_source=True)
+        self.scene.clone_environments(copy_from_source=True) # each clone will be an independent copy, under current setting only robot is copied across all envs
         self.scene.articulations["robot"] = self.robot
 
         light_cfg = sim_utils.DomeLightCfg(intensity=self.cfg.light_intensity, color=self.cfg.light_color)
