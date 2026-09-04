@@ -28,19 +28,11 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-
-try:
-    import viser
-except ImportError as exc:
-    raise SystemExit("Missing `viser`. Install it in this Python environment with `pip install viser`.") from exc
-
-try:
-    from pxr import Gf, Usd, UsdGeom
-except ImportError as exc:
-    raise SystemExit(
-        "Missing Pixar USD Python bindings (`pxr`). Run this with an Isaac/IsaacLab Python environment "
-        "or install `usd-core` into the current environment."
-    ) from exc
+import viser
+from molmo_spaces.utils.grasps import get_pickup_grasp_path
+from molmo_spaces.utils.object_metadata import ObjectMeta
+from molmo_spaces.utils.object_retriever import ObjectRetriever
+from pxr import Gf, Usd, UsdGeom
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -612,8 +604,6 @@ def list_asset_grasp_files(asset_id: str, args: argparse.Namespace) -> list[Path
                 files.append(custom_path)
 
     try:
-        from molmo_spaces.utils.grasps import get_pickup_grasp_path
-
         pickup_path = Path(get_pickup_grasp_path(asset_id, grasp_libraries=[args.grasp_source]))
         if pickup_path.is_file():
             files.append(pickup_path)
@@ -1284,9 +1274,6 @@ class MolmoViserViewer:
             self.set_status("Enter an object query first.")
             return
         try:
-            from molmo_spaces.utils.object_metadata import ObjectMeta
-            from molmo_spaces.utils.object_retriever import ObjectRetriever
-
             retriever = ObjectRetriever(max_results=25)
             uids, sims = retriever.query(query)
             if len(uids) == 0:
