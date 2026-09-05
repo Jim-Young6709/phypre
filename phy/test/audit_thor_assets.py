@@ -1,4 +1,9 @@
-"""Audit THOR USD variants, metadata, bounding boxes, and grasps.
+"""
+--------------------------------------------
+Pure Codex generated scripts with no review.
+--------------------------------------------
+
+Audit THOR USD variants, metadata, bounding boxes, and grasps.
 
 Run from the ``phypre`` directory:
 

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Visual-only Viser viewer for MolmoSpaces USD scenes and objects.
+"""
+--------------------------------------------
+Pure Codex generated scripts with no review.
+--------------------------------------------
+
+Visual-only Viser viewer for MolmoSpaces USD scenes and objects.
 
 This viewer extracts triangle meshes from the composed USD stage and sends them
 to Viser. It does not run Isaac physics or preserve USD materials/textures.
