@@ -1,4 +1,9 @@
-"""Load MolmoSpaces USD assets in an Isaac Lab standalone app.
+"""
+--------------------------------------------
+Pure Codex generated scripts with no review.
+--------------------------------------------
+
+Load MolmoSpaces USD assets in an Isaac Lab standalone app.
 
 Examples:
     ./IsaacLab/isaaclab.sh -p phy/load_molmospaces_isaaclab.py --steps 300
