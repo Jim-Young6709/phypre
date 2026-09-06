@@ -21,12 +21,13 @@ from typing import Any
 
 from phy.utils.assets import (
     DEFAULT_USD_ROOT,
+    GRASP_ROOT,
     METADATA_PATHS,
     ThorAsset,
     discover_thor_assets,
+    load_asset_grasps,
     load_usd_asset_metadata,
 )
-from phy.utils.grasps import GRASP_ROOT, load_asset_grasps
 
 OBJECT_ROOT = DEFAULT_USD_ROOT / "objects" / "thor"
 DEFAULT_OUTPUT_PATH = (

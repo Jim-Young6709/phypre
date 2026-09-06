@@ -1,4 +1,4 @@
-"""THOR USD discovery and metadata loading.""" # TODO: this is THOR specific
+"""THOR asset discovery, metadata, selection, and grasp loading.""" # TODO: asset loading is THOR specific, grasp loading is DROID set (include all THOR grasps) specific
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 import numpy as np
 
@@ -29,6 +30,7 @@ METADATA_PATHS = (
     / "resources"
     / "usd_assets_metadata.json",
 )
+GRASP_ROOT = Path.home() / ".cache" / "molmo-spaces-resources"
 
 
 @dataclass(frozen=True) # frozen to prevent accidental mutation of the asset data
@@ -113,3 +115,56 @@ def object_height(
         return default_height
     local_extent = np.abs(np.asarray(bbox_size[:3], dtype=np.float64))
     return float((np.abs(wxyz_to_matrix(asset_root_orientation)) @ local_extent)[2])
+
+
+def load_asset_grasps(asset_id: str, num_grasps: int = 0) -> np.ndarray | None:
+    """Load object-relative grasp transforms for one asset."""
+    pattern = f"*/{asset_id}/{asset_id}_grasps_filtered.npz"
+    paths = sorted((GRASP_ROOT / "grasps" / "droid").glob(pattern))
+    if not paths:
+        return None
+
+    try:
+        with np.load(paths[-1]) as data:
+            transforms = np.asarray(data["transforms"], dtype=np.float64)
+        if transforms.ndim != 3 or transforms.shape[1:] != (4, 4):
+            raise ValueError(f"expected (N, 4, 4), got {transforms.shape}")
+    except (BadZipFile, EOFError, KeyError, OSError, ValueError) as error:
+        print(f"[WARN] Could not load grasps for {asset_id}: {error}")
+        return None
+
+    if num_grasps > 0:
+        transforms = transforms[:num_grasps]
+    return transforms if len(transforms) else None
+
+
+def select_env_assets(
+    assets: list[ThorAsset],
+    num_envs: int,
+    start_object_idx: int,
+    num_grasps: int,
+    require_grasps: bool,
+) -> tuple[list[ThorAsset], dict[str, np.ndarray]]:
+    """Choose an asset per environment and optionally require grasp data."""
+
+    # re-ordering assets list according to the start index
+    start = start_object_idx % len(assets)
+    ordered = [assets[(start + index) % len(assets)] for index in range(len(assets))]
+    if not require_grasps:
+        return [ordered[index % len(ordered)] for index in range(num_envs)], {}
+
+    grasps: dict[str, np.ndarray] = {}
+    valid: list[ThorAsset] = []
+    for asset in ordered:
+        grasp_poses = load_asset_grasps(asset.asset_id, num_grasps)
+        if grasp_poses is not None:
+            grasps[asset.asset_id] = grasp_poses
+            valid.append(asset)
+        if len(valid) == num_envs:
+            break
+
+    if not valid:
+        raise RuntimeError(f"No THOR assets with grasps found in {GRASP_ROOT}.")
+    if len(valid) < num_envs:
+        print(f"[WARN] Reusing {len(valid)} graspable assets across {num_envs} envs.")
+    return [valid[index % len(valid)] for index in range(num_envs)], grasps
