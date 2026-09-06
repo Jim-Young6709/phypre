@@ -54,8 +54,8 @@ CACHE_USD_ROOT = Path.home() / ".molmospaces" / "usd"
 DEFAULT_SCENE_NAME = "FloorPlan1_physics"
 DEFAULT_ASSET_ID = "Apple_1"
 DEFAULT_OBJECT_POSITION = (0.0, -1.0, 0.0)
-ASSET_AXIS_CONVENTIONS = ("thor_y_up", "usd")
-THOR_Y_UP_TO_Z_UP_MATRIX = np.asarray(
+ASSET_AXIS_CONVENTIONS = ("y_up_to_z_up", "usd")
+Y_UP_TO_Z_UP_MATRIX = np.asarray(
     [
         [1.0, 0.0, 0.0],
         [0.0, 0.0, -1.0],
@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--asset-axis-convention",
         choices=ASSET_AXIS_CONVENTIONS,
-        default="thor_y_up",
+        default="y_up_to_z_up",
         help="THOR object source axis convention. Use `usd` to view the USD root transform without conversion.",
     )
     parser.add_argument("--max-scene-triangles", type=int, default=800_000)
@@ -299,8 +299,8 @@ def extract_usd_mesh(path_str: str, include_collision: bool, max_triangles: int)
 
 
 def axis_conversion_matrix(convention: str) -> np.ndarray:
-    if convention == "thor_y_up":
-        return THOR_Y_UP_TO_Z_UP_MATRIX
+    if convention == "y_up_to_z_up":
+        return Y_UP_TO_Z_UP_MATRIX
     if convention == "usd":
         return np.eye(3, dtype=np.float64)
     raise ValueError(f"Unknown asset axis convention {convention!r}.")

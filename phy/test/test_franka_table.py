@@ -32,10 +32,7 @@ def main() -> None:
             try:
                 env.sim.set_camera_view(eye=[2.2, -2.2, 1.6], target=[0.55, 0.0, 0.45])
                 env.reset()
-                print(
-                    f"[INFO] Loaded {len(env.selected_assets)} env(s) "
-                    f"from {len(env.thor_assets)} discovered THOR assets."
-                )
+                print(f"[INFO] Loaded {len(env.selected_assets)} env(s).")
 
                 actions = torch.zeros(
                     (env.num_envs, env.num_action_joints), device=env.device

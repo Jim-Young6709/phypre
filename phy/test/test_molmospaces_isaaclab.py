@@ -39,9 +39,9 @@ CACHE_USD_ROOT = Path.home() / ".molmospaces" / "usd"
 DEFAULT_SCENE_NAME = "FloorPlan1_physics"
 DEFAULT_ASSET_ID = "Apple_1"
 DEFAULT_OBJECT_POSITION = (0.0, -1.0, 0.0)
-ASSET_AXIS_CONVENTIONS = ("thor_y_up", "usd")
+ASSET_AXIS_CONVENTIONS = ("y_up_to_z_up", "usd")
 IDENTITY_WXYZ = (1.0, 0.0, 0.0, 0.0)
-THOR_Y_UP_TO_ISAAC_Z_UP_WXYZ = (math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0)
+Y_UP_TO_Z_UP_WXYZ = (math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0)
 
 
 parser = argparse.ArgumentParser(description="Load MolmoSpaces thor/ithor USDs in Isaac Lab.")
@@ -59,7 +59,7 @@ parser.add_argument("--asset-position", type=float, nargs=3, default=DEFAULT_OBJ
 parser.add_argument(
     "--asset-axis-convention",
     choices=ASSET_AXIS_CONVENTIONS,
-    default="thor_y_up",
+    default="y_up_to_z_up",
     help="THOR object source axis convention. Use `usd` to load the USD root transform without conversion.",
 )
 parser.add_argument("--steps", type=int, default=0, help="0 runs until the app closes.")
@@ -201,8 +201,8 @@ def asset_id_from_path(asset_path: Path) -> str:
 
 
 def axis_conversion_wxyz(convention: str) -> tuple[float, float, float, float]:
-    if convention == "thor_y_up":
-        return THOR_Y_UP_TO_ISAAC_Z_UP_WXYZ
+    if convention == "y_up_to_z_up":
+        return Y_UP_TO_Z_UP_WXYZ
     if convention == "usd":
         return IDENTITY_WXYZ
     raise ValueError(f"Unknown asset axis convention {convention!r}.")
@@ -223,7 +223,7 @@ def metadata_paths() -> list[Path]:
 
 def load_bbox_height(asset_path: Path) -> float:
     asset_id = asset_id_from_path(asset_path)
-    height_axis = 1 if args_cli.asset_axis_convention == "thor_y_up" else 2
+    height_axis = 1 if args_cli.asset_axis_convention == "y_up_to_z_up" else 2
     for metadata_path in metadata_paths():
         if not metadata_path.is_file():
             continue
