@@ -150,6 +150,7 @@ def select_env_assets(
     # re-ordering assets list according to the start index
     start = start_object_idx % len(assets)
     ordered = [assets[(start + index) % len(assets)] for index in range(len(assets))]
+
     if not require_grasps:
         return [ordered[index % len(ordered)] for index in range(num_envs)], {}
 
