@@ -6,10 +6,16 @@ from collections.abc import Sequence
 
 import isaaclab.sim as sim_utils
 import torch
+from curobo.geom.sdf.world import CollisionCheckerType
+from curobo.geom.types import WorldConfig
+from curobo.types.base import TensorDeviceType
+from curobo.types.math import Pose
+from curobo.types.state import JointState
+from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import sample_uniform
+from isaaclab.utils.math import sample_uniform, subtract_frame_transforms
 
 from phy.cfg.franka_base_env_cfg import FrankaBaseEnvCfg
 
@@ -27,6 +33,9 @@ class FrankaBaseEnv(DirectRLEnv):
         self.arm_dof_indices = self._joint_indices(self.cfg.arm_joint_names)
         self.gripper_dof_indices = self._joint_indices(self.cfg.gripper_joint_names)
         self.gripper_dof_index = self.gripper_dof_indices[0]
+        self.canonical_arm_joint_pos = torch.tensor(
+            self.cfg.canonical_arm_joint_pos, dtype=torch.float32, device=self.device
+        ) # dim (7,)
         self.logical_dof_indices = self.arm_dof_indices + [self.gripper_dof_index]
         self.actuated_dof_indices = self.arm_dof_indices + self.gripper_dof_indices
 
@@ -48,6 +57,16 @@ class FrankaBaseEnv(DirectRLEnv):
 
         self.actions = torch.zeros((self.num_envs, self.num_action_joints), device=self.device) # TODO: check if this is normalized actions & if this is delta actions
         self.robot_dof_targets = self.robot.data.default_joint_pos.clone()
+        self.curobo_ik_solver = IKSolver(
+            IKSolverConfig.load_from_robot_config(
+                "franka.yml",
+                WorldConfig(),
+                tensor_args=TensorDeviceType(device=torch.device(self.device)),
+                num_seeds=32,
+                collision_checker_type=CollisionCheckerType.PRIMITIVE,
+                collision_cache={"obb": 100},
+            )
+        )
 
     def _joint_indices(self, joint_names: Sequence[str]) -> list[int]:
         """Return articulation indices in the requested joint-name order."""
@@ -58,6 +77,75 @@ class FrankaBaseEnv(DirectRLEnv):
             except ValueError as exc:
                 raise ValueError(f"Joint {joint_name!r} not found in Franka joints: {self.robot.joint_names}") from exc
         return joint_indices
+
+    def franka_ik(
+        self,
+        eef_pose_w: torch.Tensor,
+        null_space_target: torch.Tensor | None = None,
+        obstacles: WorldConfig | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve collision-aware IK for a batch of end-effector poses.
+
+        Args:
+            eef_pose_w: World-frame poses shaped ``[B, 7]`` and ordered as
+                ``[x, y, z, qw, qx, qy, qz]``.
+            null_space_target: Arm configurations shaped ``[B, 7]`` and ordered
+                according to ``cfg.arm_joint_names``.
+            obstacles: Optional shared robot-base-frame world containing up to 100
+                cuboids. A provided world replaces the current world; ``None`` clears it.
+
+                Example::
+
+                    from curobo.geom.types import Cuboid, WorldConfig
+                    obstacles = WorldConfig(cuboid=[Cuboid(name="table", dims=[0.8, 0.8, 0.05],
+                        pose=[0.55, 0.0, 0.35, 1.0, 0.0, 0.0, 0.0])])
+
+        Returns:
+            Arm targets shaped ``[B, 7]`` in ``cfg.arm_joint_names`` order and the
+            CuRobo success mask for each batch element.
+        """
+        batch_size = eef_pose_w.shape[0]
+        eef_pose_w = eef_pose_w.to(device=self.device, dtype=torch.float32)
+        if null_space_target is None:
+            null_space_target = self.canonical_arm_joint_pos.expand(batch_size, -1)
+        else:
+            null_space_target = null_space_target.to(device=self.device, dtype=torch.float32)
+        root_pose_w = self.robot.data.root_pose_w[:batch_size]
+        eef_pos_b, eef_quat_b = subtract_frame_transforms(
+            root_pose_w[:, :3],
+            root_pose_w[:, 3:7],
+            eef_pose_w[:, :3],
+            eef_pose_w[:, 3:7],
+        )
+
+        null_space_target = JointState.from_position(
+            null_space_target, joint_names=self.cfg.arm_joint_names
+        ).get_ordered_joint_state(self.curobo_ik_solver.joint_names).position
+
+        # ik solver need to have a fixed batch size (set to num_envs here), because by default use_cuda_graph=True and is necessary to boost ik speed
+        if batch_size < self.num_envs:
+            padding = self.num_envs - batch_size
+            eef_pos_b = torch.cat((eef_pos_b, eef_pos_b[:1].expand(padding, -1)))
+            eef_quat_b = torch.cat((eef_quat_b, eef_quat_b[:1].expand(padding, -1)))
+            null_space_target = torch.cat(
+                (null_space_target, null_space_target[:1].expand(padding, -1))
+            )
+
+        # Note under current implementation the obstacle config is not batched, this assume the same set of obstacles for every envs
+        # TODO: have a proper batched collision free IK
+        if obstacles is None or not obstacles.cuboid:
+            self.curobo_ik_solver.world_coll_checker.clear_cache()
+        else:
+            self.curobo_ik_solver.update_world(obstacles)
+
+        goal = Pose(position=eef_pos_b, quaternion=eef_quat_b)
+        result = self.curobo_ik_solver.solve_batch(
+            goal_pose=goal, retract_config=null_space_target
+        )
+        arm_targets = JointState.from_position(
+            result.solution[:batch_size, 0], joint_names=self.curobo_ik_solver.joint_names
+        ).get_ordered_joint_state(self.cfg.arm_joint_names).position
+        return arm_targets, result.success[:batch_size, 0]
 
     def _setup_scene(self) -> None:
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -127,7 +215,9 @@ class FrankaBaseEnv(DirectRLEnv):
 
         super()._reset_idx(env_ids)
 
-        joint_pos = self.robot.data.default_joint_pos[env_ids] + sample_uniform(
+        joint_pos = self.robot.data.default_joint_pos[env_ids].clone()
+        joint_pos[:, self.arm_dof_indices] = self.canonical_arm_joint_pos
+        joint_pos += sample_uniform(
             -self.cfg.joint_reset_noise,
             self.cfg.joint_reset_noise,
             (len(env_ids), self.num_robot_dofs),

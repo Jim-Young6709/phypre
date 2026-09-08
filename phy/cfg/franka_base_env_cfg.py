@@ -118,14 +118,15 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
         use_robotiq_gripper=use_robotiq_gripper
     )
     arm_joint_names = [
-        "panda_joint2",
         "panda_joint1",
+        "panda_joint2",
         "panda_joint3",
         "panda_joint4",
         "panda_joint5",
         "panda_joint6",
         "panda_joint7",
     ]
+    canonical_arm_joint_pos = (0.0, 0.0, 0.0, -2.35619, 0.0, 2.35619, 0.0)
     gripper_joint_names = (
         ["finger_joint"]
         if use_robotiq_gripper
