@@ -76,7 +76,7 @@ def main() -> None:
                     f"{torch.nonzero(~ik_success, as_tuple=False).flatten().tolist()}."
                 )
                 env.robot_dof_targets[:, env.arm_dof_indices] = arm_targets
-                print("[INFO] Collision-aware IK passed; moving panda_hand 5 cm upward.")
+                print("[INFO] Collision-aware IK passed; moving panda_hand 30 cm upward.")
 
                 actions = torch.zeros(
                     (env.num_envs, env.num_action_joints), device=env.device

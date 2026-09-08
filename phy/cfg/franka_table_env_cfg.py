@@ -14,7 +14,7 @@ class FrankaTableEnvCfg(FrankaBaseEnvCfg):
     """Franka table task configuration."""
 
     table_size = (0.80, 0.80, 0.05)
-    table_center = (0.55, 0.0, 0.35)
+    table_center = (0.55, 0.0, -0.025) # table surface height will be 0.0
     object_xy_offset = (0.0, 0.0)
     object_table_clearance = 0.005
     default_object_height = 0.20
