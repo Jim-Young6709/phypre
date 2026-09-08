@@ -15,13 +15,20 @@ from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
-from isaaclab.utils.math import sample_uniform, subtract_frame_transforms
+from isaaclab.utils.math import (
+    quat_apply,
+    quat_from_angle_axis,
+    quat_mul,
+    sample_uniform,
+    subtract_frame_transforms,
+)
 
 from phy.cfg.franka_base_env_cfg import FrankaBaseEnvCfg
+from phy.utils.eef_ctrl import compute_dof_pos_delta
 
 
 class FrankaBaseEnv(DirectRLEnv):
-    """Base Franka env with only robot control, reset, and placeholder RL signals."""
+    """Base Franka env with joint or differential-IK end-effector control."""
 
     cfg: FrankaBaseEnvCfg
 
@@ -36,12 +43,17 @@ class FrankaBaseEnv(DirectRLEnv):
         self.canonical_arm_joint_pos = torch.tensor(
             self.cfg.canonical_arm_joint_pos, dtype=torch.float32, device=self.device
         ) # dim (7,)
+        self.ik_regularization_config = self.canonical_arm_joint_pos.expand(
+            self.num_envs, -1
+        ).clone()
         self.logical_dof_indices = self.arm_dof_indices + [self.gripper_dof_index]
         self.actuated_dof_indices = self.arm_dof_indices + self.gripper_dof_indices
 
         self.num_arm_actions = len(self.arm_dof_indices)
         self.num_gripper_actions = 1
-        self.num_action_joints = self.num_arm_actions + self.num_gripper_actions
+        self.num_action_joints = (
+            6 if self.cfg.use_eef_control else self.num_arm_actions
+        ) + self.num_gripper_actions
         if isinstance(self.cfg.action_space, int) and self.cfg.action_space != self.num_action_joints:
             raise ValueError(
                 f"action_space={self.cfg.action_space} must match {self.num_action_joints} control actions."
@@ -51,9 +63,20 @@ class FrankaBaseEnv(DirectRLEnv):
         self.robot_dof_lower_limits = joint_pos_limits[..., 0]
         self.robot_dof_upper_limits = joint_pos_limits[..., 1]
 
-        # arm speed scale set to 1.0, gripper speed scale set to 0.1
-        self.robot_dof_speed_scales = torch.ones(self.num_action_joints, device=self.device)
-        self.robot_dof_speed_scales[-1] = 0.1
+        if self.cfg.use_eef_control:
+            eef_body_ids, _ = self.robot.find_bodies(self.cfg.eef_body_name)
+            if not eef_body_ids:
+                raise ValueError(
+                    f"Body {self.cfg.eef_body_name!r} not found: {self.robot.body_names}"
+                )
+            self._eef_body_id = eef_body_ids[0]
+            self._eef_jacobi_idx = (
+                self._eef_body_id - 1 if self.robot.is_fixed_base else self._eef_body_id
+            )
+            jacobian_dof_offset = 0 if self.robot.is_fixed_base else 6
+            self._eef_jacobian_dof_indices = [
+                index + jacobian_dof_offset for index in self.arm_dof_indices
+            ]
 
         self.actions = torch.zeros((self.num_envs, self.num_action_joints), device=self.device) # TODO: check if this is normalized actions & if this is delta actions
         self.robot_dof_targets = self.robot.data.default_joint_pos.clone()
@@ -107,7 +130,7 @@ class FrankaBaseEnv(DirectRLEnv):
         batch_size = eef_pose_w.shape[0]
         eef_pose_w = eef_pose_w.to(device=self.device, dtype=torch.float32)
         if null_space_target is None:
-            null_space_target = self.canonical_arm_joint_pos.expand(batch_size, -1)
+            null_space_target = self.ik_regularization_config[:batch_size]
         else:
             null_space_target = null_space_target.to(device=self.device, dtype=torch.float32)
         root_pose_w = self.robot.data.root_pose_w[:batch_size]
@@ -161,18 +184,94 @@ class FrankaBaseEnv(DirectRLEnv):
     def _setup_task_scene(self) -> None:
         """Hook for child environments to add task-specific assets after env cloning."""
 
-    def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        """Actions are interpreted as normalized joint target-velocity commands, which is dequivalent to delta joint position in this context"""
-        self.actions = actions.clone().clamp(-1.0, 1.0)
-        targets = self.robot_dof_targets[:, self.logical_dof_indices]
-        targets = targets + self.robot_dof_speed_scales * self.dt * self.actions * self.cfg.action_scale
-        targets = torch.clamp(
-            targets,
-            self.robot_dof_lower_limits[:, self.logical_dof_indices],
-            self.robot_dof_upper_limits[:, self.logical_dof_indices],
+    def _compute_eef_arm_targets(self, eef_actions: torch.Tensor) -> torch.Tensor:
+        eef_pose_w = self.robot.data.body_pose_w[:, self._eef_body_id]
+        position_delta_local = (
+            eef_actions[:, :3] * self.cfg.eef_position_action_scale * self.dt
         )
-        self.robot_dof_targets[:, self.arm_dof_indices] = targets[:, : self.num_arm_actions]
-        self.robot_dof_targets[:, self.gripper_dof_indices] = targets[:, -1:].expand(
+        rotation_delta_local = (
+            eef_actions[:, 3:6] * self.cfg.eef_rotation_action_scale * self.dt
+        )
+        target_eef_pos = eef_pose_w[:, :3] + quat_apply(
+            eef_pose_w[:, 3:7], position_delta_local
+        )
+        angle = torch.linalg.vector_norm(rotation_delta_local, dim=-1)
+        axis = rotation_delta_local / angle.unsqueeze(-1).clamp_min(1.0e-8)
+        rotation_delta_quat_local = quat_from_angle_axis(angle, axis)
+        target_eef_quat = quat_mul(
+            eef_pose_w[:, 3:7], rotation_delta_quat_local
+        )
+        jacobian = self.robot.root_physx_view.get_jacobians()[
+            :, self._eef_jacobi_idx, :, self._eef_jacobian_dof_indices
+        ]
+        joint_pos = self.robot.data.joint_pos[:, self.arm_dof_indices]
+        delta_joint_pos = compute_dof_pos_delta(
+            arm_dof_pos=joint_pos,
+            current_eef_pos=eef_pose_w[:, :3],
+            current_eef_quat=eef_pose_w[:, 3:7],
+            jacobian=jacobian,
+            ctrl_target_eef_pos=target_eef_pos,
+            ctrl_target_eef_quat=target_eef_quat,
+            ik_nullspace_target=self.ik_regularization_config,
+            ik_nullspace_gain=self.cfg.eef_ik_nullspace_gain,
+            damping=self.cfg.eef_ik_damping,
+        )
+        return joint_pos + delta_joint_pos
+
+    def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        """
+        Convert normalized actions into arm and gripper joint-position targets.
+
+        In joint mode, the first seven actions are normalized joint deltas.
+        In EEF mode, the first six actions are local-frame XYZ
+        and axis-angle deltas for ``panda_hand``, converted to arm targets by
+        differential IK.
+        The final action updates the gripper target in either mode.
+        All actions and resulting joint targets are clamped to their limits.
+        """
+        self.actions = actions.clone().clamp(-1.0, 1.0)
+
+        # compute arm joint targets
+        if self.cfg.use_eef_control:
+            arm_targets = self._compute_eef_arm_targets(self.actions[:, :6])
+        else:
+            joint_pos = self.robot.data.joint_pos[:, self.arm_dof_indices]
+            joint_range = (
+                self.robot_dof_upper_limits[:, self.arm_dof_indices]
+                - self.robot_dof_lower_limits[:, self.arm_dof_indices]
+            )
+            arm_targets = joint_pos + (
+                self.actions[:, : self.num_arm_actions]
+                * self.cfg.franka_joint_action_scale
+                * self.dt
+                * joint_range
+            )
+
+        # compute gripper joint targets
+        gripper_targets = self.robot_dof_targets[
+            :, self.gripper_dof_index : self.gripper_dof_index + 1
+        ]
+        gripper_targets = gripper_targets + (
+            self.actions[:, -1:]
+            * self.cfg.gripper_action_scale
+            * self.dt
+        )
+        gripper_targets = torch.clamp(
+            gripper_targets,
+            self.robot_dof_lower_limits[
+                :, self.gripper_dof_index : self.gripper_dof_index + 1
+            ],
+            self.robot_dof_upper_limits[
+                :, self.gripper_dof_index : self.gripper_dof_index + 1
+            ],
+        )
+
+        self.robot_dof_targets[:, self.arm_dof_indices] = torch.clamp(
+            arm_targets,
+            self.robot_dof_lower_limits[:, self.arm_dof_indices],
+            self.robot_dof_upper_limits[:, self.arm_dof_indices],
+        )
+        self.robot_dof_targets[:, self.gripper_dof_indices] = gripper_targets.expand(
             -1, len(self.gripper_dof_indices)
         )
 

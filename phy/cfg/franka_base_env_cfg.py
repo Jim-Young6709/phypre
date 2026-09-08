@@ -87,12 +87,24 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     episode_length_s = 10.0 # this gives 10x60Hz = 600 policy control steps per episode
     num_sim_steps_to_render = 2 # every 2 physics steps, render a frame, so render runs at 60Hz which is consistent with control frequency
 
-    action_space = 8 # 7 DoF arm + 1 scalar gripper action
-    observation_space = 24
+    # EEF control uses local-frame delta XYZ, delta axis-angle, and one gripper action.
+    use_eef_control = False
+    eef_body_name = "panda_hand"
+    eef_position_action_scale = 0.6
+    eef_rotation_action_scale = 0.6
+    eef_ik_damping = 0.1
+    eef_ik_nullspace_gain = 0.05
+
+    franka_joint_action_scale = 0.6
+    gripper_action_scale =0.1
+    dof_velocity_scale = 0.1 # rescale joint velocity so the variable is on the same order of magnitude as the normalized joint position [-1, 1]
+    joint_reset_noise = 0.125
+
+    action_space = 7 if use_eef_control else 8  # joint control: 7 arm joints + 1 scalar gripper action ; eef_control: 3 delta XYZ + 3 delta axis-angle + 1 scalar gripper action
+    observation_space = 23 if use_eef_control else 24  # joint state, joint velocity, and previous action
     state_space = 0 # critic specific state space, for privileged information
 
-    # Select the Franka asset variant with a Robotiq 2F-85 gripper. Both
-    # variants expose one scalar gripper action, so action_space remains 8.
+    # Select the Franka asset variant with a Robotiq 2F-85 gripper.
     use_robotiq_gripper = False
 
     sim: SimulationCfg = SimulationCfg(
@@ -132,10 +144,6 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
         if use_robotiq_gripper
         else ["panda_finger_joint1", "panda_finger_joint2"]
     )
-
-    action_scale = 7.5
-    dof_velocity_scale = 0.1 # rescale joint velocity so the variable is on the same order of magnitude as the normalized joint position [-1, 1]
-    joint_reset_noise = 0.125
 
     ground_prim_path = "/World/ground"
     light_prim_path = "/World/Light"
