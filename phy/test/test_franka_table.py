@@ -1,4 +1,11 @@
-"""Run the Franka table environment in Isaac Lab."""
+"""
+--------------------------------------------
+Pure Codex generated scripts with no review.
+--------------------------------------------
+
+Run the Franka table environment in Isaac Lab.
+
+"""
 
 from __future__ import annotations
 
