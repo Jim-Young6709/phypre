@@ -33,6 +33,10 @@ class FrankaBaseEnv(DirectRLEnv):
     cfg: FrankaBaseEnvCfg
 
     def __init__(self, cfg: FrankaBaseEnvCfg, render_mode: str | None = None, **kwargs):
+        if cfg.use_eef_control:
+            cfg.action_space = 7
+            cfg.observation_space = 2 * (len(cfg.arm_joint_names) + 1) + 7
+
         super().__init__(cfg, render_mode, **kwargs) # will call setup scene
 
         self.dt = self.cfg.sim.dt * self.cfg.decimation # effective control timestep
