@@ -1,4 +1,10 @@
-"""THOR asset discovery, metadata, selection, and grasp loading.""" # TODO: asset loading is THOR specific, grasp loading is DROID set (include all THOR grasps) specific
+"""
+--------------------------------------------
+NOT THOROUGHLY REVIEWED Codex generated scripts.
+--------------------------------------------
+
+THOR asset discovery, metadata, selection, and grasp loading.
+""" # TODO: asset loading is THOR specific, grasp loading is DROID set (include all THOR grasps) specific
 
 from __future__ import annotations
 
