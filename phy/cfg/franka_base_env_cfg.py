@@ -62,15 +62,15 @@ def make_franka_robot_cfg(use_robotiq_gripper: bool = False) -> ArticulationCfg:
                 stiffness={
                     "panda_joint[1-4]": 300.0,
                     "panda_joint5": 100.0,
-                    "panda_joint6": 50.0,
-                    "panda_joint7": 25.0,
+                    "panda_joint6": 100.0,
+                    "panda_joint7": 100.0,
                     gripper_joint_expr: 2e3,
                 },
                 damping={
                     "panda_joint[1-4]": 45.0,
                     "panda_joint5": 20.0,
-                    "panda_joint6": 15.0,
-                    "panda_joint7": 15.0,
+                    "panda_joint6": 20.0,
+                    "panda_joint7": 20.0,
                     gripper_joint_expr: 1e2,
                 },
             ),
@@ -138,7 +138,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
         "panda_joint6",
         "panda_joint7",
     ]
-    canonical_arm_joint_pos = (0.0, 0.0, 0.0, -2.35619, 0.0, 2.35619, 0.0)
+    canonical_arm_joint_pos = (0.0, 0.0, 0.0, -2.35619, 0.0, 2.35619, 0.78540)
     gripper_joint_names = (
         ["finger_joint"]
         if use_robotiq_gripper
