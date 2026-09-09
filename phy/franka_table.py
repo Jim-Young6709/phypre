@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import isaaclab.sim as sim_utils
-import numpy as np
+import torch
 from isaaclab.assets import RigidObject, RigidObjectCfg
 from isaaclab.sensors import TiledCamera
 
@@ -11,7 +11,6 @@ from phy.cfg.franka_table_env_cfg import FrankaTableEnvCfg
 from phy.franka_base_env import FrankaBaseEnv
 from phy.utils.assets import (
     discover_thor_assets,
-    load_asset_grasps,
     load_usd_asset_metadata,
     object_height,
     select_env_assets,
@@ -35,7 +34,9 @@ class FrankaTableEnv(FrankaBaseEnv):
             cfg.num_grasps,
             cfg.require_grasps,
         )
-        self.object_orientation_offset = axis_rotation_wxyz(cfg.asset_axis_convention) # in case the asset's axis convention is different from Isaac Lab's, we add the offset to make everything consistent in Isaac Lab's convention (z is up)
+        self.object_orientation_offset = axis_rotation_wxyz(
+            cfg.asset_axis_convention
+        )  # in case the asset's axis convention is different from Isaac Lab's, we add the offset to make everything consistent in Isaac Lab's convention (z is up)
         self.objects = []
         super().__init__(cfg, render_mode, **kwargs)
 
@@ -51,7 +52,7 @@ class FrankaTableEnv(FrankaBaseEnv):
                 diffuse_color=(0.55, 0.55, 0.52)
             ),
         )
- 
+
         assert len(self.selected_assets) == self.cfg.scene.num_envs
 
         for env_id, asset in enumerate(self.selected_assets):
@@ -99,13 +100,16 @@ class FrankaTableEnv(FrankaBaseEnv):
             self._recording_camera = TiledCamera(self.cfg.recording_camera)
             self.scene.sensors["recording_camera"] = self._recording_camera
 
-    def select_grasp(self, env_id: int, grasp_index: int = 0) -> tuple[np.ndarray, int]:
+    def select_grasp(
+        self, env_id: int, grasp_index: int = 0
+    ) -> tuple[torch.Tensor, int]:
         asset_id = self.selected_assets[env_id].asset_id
         grasp_poses = self.object_grasps.get(asset_id)
         if grasp_poses is None:
             raise RuntimeError(f"No grasps loaded for env_{env_id} object {asset_id}.")
 
         pose_index = grasp_index % len(grasp_poses)
-        pose = self.objects[env_id].data.root_pose_w[0].detach().cpu().numpy()
+        pose = self.objects[env_id].data.root_pose_w[0]
+        grasp_pose = grasp_poses[pose_index].to(pose)
         world_from_object = transform_from_pos_wxyz(pose[:3], pose[3:7])
-        return world_from_object @ grasp_poses[pose_index], pose_index
+        return world_from_object @ grasp_pose, pose_index

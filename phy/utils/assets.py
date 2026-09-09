@@ -10,17 +10,14 @@ from typing import Any
 from zipfile import BadZipFile
 
 import numpy as np
+import torch
 
 from .transforms import wxyz_to_matrix
 
-ROOT = Path(__file__).resolve().parents[3] # TODO: this is very much overfit to the current folder structure
-DEFAULT_USD_ROOT = (
-    ROOT
-    / "molmospaces"
-    / "molmo_spaces_isaac"
-    / "assets"
-    / "usd"
-)
+ROOT = (
+    Path(__file__).resolve().parents[3]
+)  # TODO: this is very much overfit to the current folder structure
+DEFAULT_USD_ROOT = ROOT / "molmospaces" / "molmo_spaces_isaac" / "assets" / "usd"
 METADATA_PATHS = (
     ROOT
     / "molmospaces"
@@ -107,17 +104,21 @@ def object_height(
     asset_id: str,
     metadata: dict[str, Any],
     default_height: float,
-    asset_root_orientation: tuple[float, float, float, float],
+    asset_root_orientation: torch.Tensor,
 ) -> float:
     """Compute an asset's world-space height from its oriented bounding box."""
     bbox_size = (metadata.get(asset_id) or {}).get("bbox_size")
     if not isinstance(bbox_size, list) or len(bbox_size) < 3:
         return default_height
-    local_extent = np.abs(np.asarray(bbox_size[:3], dtype=np.float64))
-    return float((np.abs(wxyz_to_matrix(asset_root_orientation)) @ local_extent)[2])
+    local_extent = torch.as_tensor(
+        bbox_size[:3],
+        dtype=asset_root_orientation.dtype,
+        device=asset_root_orientation.device,
+    ).abs()
+    return (wxyz_to_matrix(asset_root_orientation).abs() @ local_extent)[2].item()
 
 
-def load_asset_grasps(asset_id: str, num_grasps: int = 0) -> np.ndarray | None:
+def load_asset_grasps(asset_id: str, num_grasps: int = 0) -> torch.Tensor | None:
     """Load object-relative grasp transforms for one asset."""
     pattern = f"*/{asset_id}/{asset_id}_grasps_filtered.npz"
     paths = sorted((GRASP_ROOT / "grasps" / "droid").glob(pattern))
@@ -126,7 +127,7 @@ def load_asset_grasps(asset_id: str, num_grasps: int = 0) -> np.ndarray | None:
 
     try:
         with np.load(paths[-1]) as data:
-            transforms = np.asarray(data["transforms"], dtype=np.float64)
+            transforms = np.asarray(data["transforms"], dtype=np.float32)
         if transforms.ndim != 3 or transforms.shape[1:] != (4, 4):
             raise ValueError(f"expected (N, 4, 4), got {transforms.shape}")
     except (BadZipFile, EOFError, KeyError, OSError, ValueError) as error:
@@ -135,7 +136,7 @@ def load_asset_grasps(asset_id: str, num_grasps: int = 0) -> np.ndarray | None:
 
     if num_grasps > 0:
         transforms = transforms[:num_grasps]
-    return transforms if len(transforms) else None
+    return torch.from_numpy(transforms) if len(transforms) else None
 
 
 def select_env_assets(
@@ -144,7 +145,7 @@ def select_env_assets(
     start_object_idx: int,
     num_grasps: int,
     require_grasps: bool,
-) -> tuple[list[ThorAsset], dict[str, np.ndarray]]:
+) -> tuple[list[ThorAsset], dict[str, torch.Tensor]]:
     """Choose an asset per environment and optionally require grasp data."""
 
     # re-ordering assets list according to the start index
@@ -154,7 +155,7 @@ def select_env_assets(
     if not require_grasps:
         return [ordered[index % len(ordered)] for index in range(num_envs)], {}
 
-    grasps: dict[str, np.ndarray] = {}
+    grasps: dict[str, torch.Tensor] = {}
     valid: list[ThorAsset] = []
     for asset in ordered:
         grasp_poses = load_asset_grasps(asset.asset_id, num_grasps)
