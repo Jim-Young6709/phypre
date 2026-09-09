@@ -1,8 +1,4 @@
 """
---------------------------------------------
-NOT THOROUGHLY REVIEWED Codex generated scripts.
---------------------------------------------
-
 THOR asset discovery, metadata, selection, and grasp loading.
 """ # TODO: asset loading is THOR specific, grasp loading is DROID set (include all THOR grasps) specific
 
