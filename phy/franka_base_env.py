@@ -105,6 +105,26 @@ class FrankaBaseEnv(DirectRLEnv):
                 raise ValueError(f"Joint {joint_name!r} not found in Franka joints: {self.robot.joint_names}") from exc
         return joint_indices
 
+    def set_robot_joint_state(
+        self,
+        joint_state: torch.Tensor,
+        joint_vel: torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set the arm and gripper joint state for selected environments.
+
+        Args:
+            joint_state: Joint positions shaped ``[B, num_robot_dofs]`` in the
+                articulation's joint order.
+            joint_vel: Optional joint velocities with the same shape as
+                ``joint_state``. Velocities default to zero.
+            env_ids: The ``B`` environment indices to update. Defaults to every
+                environment.
+        """
+        if joint_vel is None:
+            joint_vel = torch.zeros_like(joint_state)
+        self.robot.write_joint_state_to_sim(joint_state, joint_vel, env_ids=env_ids)
+
     def franka_ik(
         self,
         eef_pose_w: torch.Tensor,
