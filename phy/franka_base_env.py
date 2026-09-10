@@ -209,6 +209,7 @@ class FrankaBaseEnv(DirectRLEnv):
         """Hook for child environments to add task-specific assets after env cloning."""
 
     def _compute_eef_arm_targets(self, eef_actions: torch.Tensor) -> torch.Tensor:
+        """eef actions are interpreted as in eef local frame, and converted to arm joint targets by differential IK."""
         eef_pose_w = self.robot.data.body_pose_w[:, self._eef_body_id]
         position_delta_local = (
             eef_actions[:, :3] * self.cfg.eef_position_action_scale * self.dt
