@@ -6,6 +6,8 @@ import isaaclab.sim as sim_utils
 from isaaclab.sensors import TiledCameraCfg
 from isaaclab.utils import configclass
 
+from phy.utils.assets import DEFAULT_USD_ROOT_GRASP
+
 from .franka_base_env_cfg import FrankaBaseEnvCfg
 
 
@@ -19,6 +21,7 @@ class FrankaTableEnvCfg(FrankaBaseEnvCfg):
     object_table_clearance = 0.005
     default_object_height = 0.20
     override_object_physics = False
+    usd_root: str = str(DEFAULT_USD_ROOT_GRASP)
 
     num_grasps = 0 # 0 means load all available grasps for the object
     start_object_idx = 0

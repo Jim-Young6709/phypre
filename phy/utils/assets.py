@@ -19,7 +19,8 @@ from .transforms import wxyz_to_matrix
 ROOT = (
     Path(__file__).resolve().parents[3]
 )  # TODO: this is very much overfit to the current folder structure
-DEFAULT_USD_ROOT = ROOT / "molmospaces" / "molmo_spaces_isaac" / "assets" / "usd"
+DEFAULT_USD_ROOT_ALL = ROOT / "molmospaces" / "molmo_spaces_isaac" / "assets" / "usd"
+DEFAULT_USD_ROOT_GRASP = ROOT / "phypre" / "rigid_object_set"
 METADATA_PATHS = (
     ROOT
     / "molmospaces"
@@ -71,9 +72,9 @@ def _variant_rank(path: Path) -> int:
     return 2
 
 
-def discover_thor_assets() -> list[ThorAsset]:
-    """Discover one preferred USD variant per THOR asset in the default root."""
-    object_root = DEFAULT_USD_ROOT / "objects" / "thor"
+def discover_thor_assets(usd_root: str | Path = DEFAULT_USD_ROOT_ALL) -> list[ThorAsset]:
+    """Discover one preferred USD variant per THOR asset in a USD root."""
+    object_root = Path(usd_root).expanduser() / "objects" / "thor"
     if not object_root.is_dir():
         return []
 

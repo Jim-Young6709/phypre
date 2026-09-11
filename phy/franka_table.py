@@ -39,7 +39,7 @@ class FrankaTableEnv(FrankaBaseEnv):
         """
         self.asset_metadata = load_usd_asset_metadata()
         self.selected_assets, self.object_grasps = select_env_assets(
-            discover_thor_assets(),
+            discover_thor_assets(cfg.usd_root),
             cfg.scene.num_envs,
             cfg.start_object_idx,
             cfg.num_grasps,

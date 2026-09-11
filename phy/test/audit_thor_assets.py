@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from phy.utils.assets import (
-    DEFAULT_USD_ROOT,
+    DEFAULT_USD_ROOT_ALL,
     GRASP_ROOT,
     METADATA_PATHS,
     ThorAsset,
@@ -29,7 +29,7 @@ from phy.utils.assets import (
     load_usd_asset_metadata,
 )
 
-OBJECT_ROOT = DEFAULT_USD_ROOT / "objects" / "thor"
+OBJECT_ROOT = DEFAULT_USD_ROOT_ALL / "objects" / "thor"
 DEFAULT_OUTPUT_PATH = (
     Path(__file__).resolve().parents[2] / "outputs" / "thor_asset_audit.json"
 )
