@@ -16,6 +16,7 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import (
+    axis_angle_from_quat,
     quat_apply,
     quat_from_angle_axis,
     quat_mul,
@@ -207,6 +208,33 @@ class FrankaBaseEnv(DirectRLEnv):
 
     def _setup_task_scene(self) -> None:
         """Hook for child environments to add task-specific assets after env cloning."""
+
+    def make_eef_w_actions(
+        self, target_pose_w: torch.Tensor, gripper_width: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Convert a world-frame target pose to scaled local XYZ/axis-angle and gripper deltas.
+        So the executed actions through step will be exactly the same amount of delta in world frame.
+
+        But returned actions are clamped by ``_pre_physics_step`` during ``step``. so the actual executed delta in world frame may be smaller than the commanded delta.
+        """
+        current_pose_w = self.robot.data.body_pose_w[:, self._eef_body_id]
+        position_delta_local, rotation_delta_local = subtract_frame_transforms(
+            current_pose_w[:, :3],
+            current_pose_w[:, 3:7],
+            target_pose_w[:, :3],
+            target_pose_w[:, 3:7],
+        )
+        current_width = self.robot_dof_targets[:, self.gripper_dof_index, None]
+        return torch.cat(
+            (
+                position_delta_local / (self.cfg.eef_position_action_scale * self.dt),
+                axis_angle_from_quat(rotation_delta_local)
+                / (self.cfg.eef_rotation_action_scale * self.dt),
+                (gripper_width - current_width) / (self.cfg.gripper_action_scale * self.dt),
+            ),
+            dim=-1,
+        )
 
     def _compute_eef_arm_targets(self, eef_actions: torch.Tensor) -> torch.Tensor:
         """eef actions are interpreted as in eef local frame, and converted to arm joint targets by differential IK."""

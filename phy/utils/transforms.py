@@ -3,7 +3,7 @@
 NOT THOROUGHLY REVIEWED Codex generated scripts.
 --------------------------------------------
 
-Small, simulator-independent Torch transform helpers.
+simulator-independent Torch transform helpers.
 """
 
 from __future__ import annotations
