@@ -16,7 +16,9 @@ class FrankaTableDatagenCfg(FrankaTableEnvCfg):
 
     num_trajectories: int = 4
     grasp_index: int = 0
+    debug_grasp_vis: bool = False  # GUI: green grasp and cyan pregrasp grippers.
 
+    gripper_ik_offset: float = 0.1025  # Meters from panda_hand to fingertip midpoint along local +Z.
     pregrasp_offset: float = 0.1
     pregrasp_axis: str = "-z"
     pos_noise_std: float = 0.01

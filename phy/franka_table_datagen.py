@@ -5,6 +5,7 @@ Example:
         env.scene.num_envs=4 env.num_trajectories=4
 
 For video, also pass ``--enable_cameras env.enable_recording_camera=true``.
+For grasp/pregrasp GUI markers, pass ``env.debug_grasp_vis=true`` without ``--headless``.
 
 
 TODO:
@@ -54,6 +55,7 @@ class FrankaTableDatagen:
         self.h5_file = h5_file
         self.first_demo_id = first_demo_id
         self.generator = generator
+        self._grasp_debug_draw = None
 
         env_cfg = cfg.copy()
         env_cfg.start_object_idx += first_demo_id
@@ -96,6 +98,8 @@ class FrankaTableDatagen:
                 f"[INFO] Wrote demos {self.first_demo_id}..{self.first_demo_id + self.env.num_envs - 1}"
             )
         finally:
+            if self._grasp_debug_draw is not None:
+                self._grasp_debug_draw.clear_lines()
             self.recorder.close()
             self.env.close()
 
@@ -112,6 +116,15 @@ class FrankaTableDatagen:
         ]
         grasp_transforms = torch.stack([transform for transform, _ in selected_grasps])
         self.grasp_indices = [index for _, index in selected_grasps]
+        # Convert fingertip-midpoint grasps to panda_hand IK targets.
+        grasp_transforms = offset_and_perturb_transforms(
+            grasp_transforms,
+            cfg.gripper_ik_offset,
+            "-z",
+            0.0,
+            0.0,
+            self.generator,
+        )
         pregrasp_transforms = offset_and_perturb_transforms(
             grasp_transforms,
             cfg.pregrasp_offset,
@@ -124,6 +137,38 @@ class FrankaTableDatagen:
         self.pregrasp_pose_w = poses_from_transforms(pregrasp_transforms)
         self.open_width = torch.full_like(self.grasp_pose_w[:, :1], cfg.open_width)
         self.closed_width = torch.full_like(self.grasp_pose_w[:, :1], cfg.closed_width)
+        if cfg.debug_grasp_vis and env.sim.has_gui():
+            self.visualize_grasp_poses(grasp_transforms, pregrasp_transforms)
+
+    def visualize_grasp_poses(
+        self, grasp_transforms: torch.Tensor, pregrasp_transforms: torch.Tensor
+    ) -> None:
+        """Draw persistent three-line grippers at the selected world-frame poses."""
+        from isaacsim.util.debug_draw import _debug_draw
+
+        self._grasp_debug_draw = _debug_draw.acquire_debug_draw_interface()
+        self._grasp_debug_draw.clear_lines()
+        # Crossbar at the hand origin along Y, with short fingers extending in +Z.
+        half_width = self.cfg.open_width
+        points = grasp_transforms.new_tensor(
+            [
+                [0.0, -half_width, 0.0],
+                [0.0, half_width, 0.0],
+                [0.0, -half_width, 0.04],
+                [0.0, half_width, 0.04],
+            ]
+        )
+        for transforms, color in (
+            (grasp_transforms, (0.0, 1.0, 0.0, 1.0)),
+            (pregrasp_transforms, (0.0, 1.0, 1.0, 1.0)),
+        ):
+            points_w = points @ transforms[:, :3, :3].transpose(-1, -2)
+            points_w += transforms[:, None, :3, 3]
+            starts = points_w[:, [0, 0, 1]].reshape(-1, 3).cpu().tolist()
+            ends = points_w[:, [1, 2, 3]].reshape(-1, 3).cpu().tolist()
+            self._grasp_debug_draw.draw_lines(
+                starts, ends, [color] * len(starts), [3.0] * len(starts)
+            )
 
     def initialize_pregrasp(self) -> None:
         """Set the initial IK joint state and let the robot settle at the pregrasp."""
