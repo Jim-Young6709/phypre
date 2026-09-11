@@ -16,7 +16,7 @@ from isaaclab_assets.robots.franka import (
 
 
 def make_franka_robot_cfg(use_robotiq_gripper: bool = False) -> ArticulationCfg:
-    """Build a Franka Panda configuration with DEXTRAH-style gains."""
+    """Build a Franka Panda configuration with IsaacGymEnvs Franka LEAP arm gains."""
     asset_cfg = FRANKA_ROBOTIQ_GRIPPER_CFG if use_robotiq_gripper else FRANKA_PANDA_CFG
     gripper_joint_expr = (
         "finger_joint" if use_robotiq_gripper else "panda_finger_joint.*"
@@ -55,22 +55,17 @@ def make_franka_robot_cfg(use_robotiq_gripper: bool = False) -> ArticulationCfg:
         actuators={
             "panda_actuators": ImplicitActuatorCfg(
                 joint_names_expr=["panda_joint[1-7]", gripper_joint_expr],
-                effort_limit_sim={
-                    "panda_joint[1-7]": 300.0, # 100
-                    gripper_joint_expr: 200.0, # 1650
+                effort_limit_sim={ # imported from isaacgymenvs
+                    "panda_joint[1-4]": 87.0,
+                    "panda_joint[5-7]": 12.0,
+                    gripper_joint_expr: 1000.0, # 1650
                 },
                 stiffness={
-                    "panda_joint[1-4]": 300.0,
-                    "panda_joint5": 100.0,
-                    "panda_joint6": 100.0,
-                    "panda_joint7": 100.0,
+                    "panda_joint[1-7]": 1000.0,
                     gripper_joint_expr: 2e3,
                 },
                 damping={
-                    "panda_joint[1-4]": 45.0,
-                    "panda_joint5": 20.0,
-                    "panda_joint6": 20.0,
-                    "panda_joint7": 20.0,
+                    "panda_joint[1-7]": 50.0,
                     gripper_joint_expr: 1e2,
                 },
             ),
