@@ -176,7 +176,12 @@ class FrankaTableDatagen:
         pregrasp_arm_targets, success = env.franka_ik(self.pregrasp_pose_w)
         if not torch.all(success):
             failed_env_ids = torch.nonzero(~success, as_tuple=False).flatten().tolist()
-            raise RuntimeError(f"CuRobo IK failed for env IDs {failed_env_ids}.")
+            print("----------------------------------------------------------------")
+            print(
+                f"[WARNING] CuRobo IK failed for env IDs {failed_env_ids}; "
+                "continuing with the returned joint targets."
+            )
+            print("----------------------------------------------------------------")
 
         joint_pos = env.robot.data.joint_pos.clone()
         joint_pos[:, env.arm_dof_indices] = pregrasp_arm_targets
