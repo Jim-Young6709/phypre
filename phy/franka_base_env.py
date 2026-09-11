@@ -111,8 +111,9 @@ class FrankaBaseEnv(DirectRLEnv):
         joint_state: torch.Tensor,
         joint_vel: torch.Tensor | None = None,
         env_ids: Sequence[int] | torch.Tensor | None = None,
+        forward_sim: bool = False,
     ) -> None:
-        """Set the arm and gripper joint state for selected environments.
+        """Set the arm and gripper joint state for selected environments. Need to call env.sim.forward() after this to update the simulation state.
 
         Args:
             joint_state: Joint positions shaped ``[B, num_robot_dofs]`` in the
@@ -121,10 +122,13 @@ class FrankaBaseEnv(DirectRLEnv):
                 ``joint_state``. Velocities default to zero.
             env_ids: The ``B`` environment indices to update. Defaults to every
                 environment.
+            forward_sim: Whether to call ``env.sim.forward()`` after updating the joint state.
         """
         if joint_vel is None:
             joint_vel = torch.zeros_like(joint_state)
         self.robot.write_joint_state_to_sim(joint_state, joint_vel, env_ids=env_ids)
+        if forward_sim:
+            self.sim.forward()
 
     def franka_ik(
         self,
@@ -225,7 +229,7 @@ class FrankaBaseEnv(DirectRLEnv):
             target_pose_w[:, :3],
             target_pose_w[:, 3:7],
         )
-        current_width = self.robot_dof_targets[:, self.gripper_dof_index, None]
+        current_width = self.robot.data.joint_pos[:, self.gripper_dof_index, None]
         return torch.cat(
             (
                 position_delta_local / (self.cfg.eef_position_action_scale * self.dt),
@@ -279,7 +283,7 @@ class FrankaBaseEnv(DirectRLEnv):
         In EEF mode, the first six actions are local-frame XYZ
         and axis-angle deltas for ``panda_hand``, converted to arm targets by
         differential IK.
-        The final action updates the gripper target in either mode.
+        The final action offsets the measured gripper position in either mode.
         All actions and resulting joint targets are clamped to their limits.
         """
         self.actions = actions.clone().clamp(-1.0, 1.0)
@@ -301,7 +305,7 @@ class FrankaBaseEnv(DirectRLEnv):
             )
 
         # compute gripper joint targets
-        gripper_targets = self.robot_dof_targets[
+        gripper_targets = self.robot.data.joint_pos[
             :, self.gripper_dof_index : self.gripper_dof_index + 1
         ]
         gripper_targets = gripper_targets + (
@@ -329,6 +333,12 @@ class FrankaBaseEnv(DirectRLEnv):
         )
 
     def _apply_action(self) -> None:
+        """Copy joint position targets into the robot's command buffers.
+
+        Call ``scene.write_data_to_sim()`` afterward to send these commands to
+        the physics engine. ``env.step()`` does this automatically before each
+        physics substep.
+        """
         self.robot.set_joint_position_target(
             self.robot_dof_targets[:, self.actuated_dof_indices],
             joint_ids=self.actuated_dof_indices,

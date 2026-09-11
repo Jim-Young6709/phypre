@@ -26,6 +26,17 @@ class FrankaTableEnv(FrankaBaseEnv):
     def __init__(
         self, cfg: FrankaTableEnvCfg, render_mode: str | None = None, **kwargs
     ):
+        """Initialize table scenes and cache object-relative grasp transforms.
+
+        Args:
+            cfg: Environment settings; ``cfg.scene.num_envs`` is the scene count N.
+            render_mode: Rendering mode forwarded to the base environment.
+            **kwargs: Additional base-environment initialization arguments.
+
+        Returns:
+            None. Creates N object instances and caches grasp tensors shaped
+            ``(G, 4, 4)`` per loaded asset, where G is its grasp count.
+        """
         self.asset_metadata = load_usd_asset_metadata()
         self.selected_assets, self.object_grasps = select_env_assets(
             discover_thor_assets(),
@@ -41,6 +52,15 @@ class FrankaTableEnv(FrankaBaseEnv):
         super().__init__(cfg, render_mode, **kwargs)
 
     def _setup_task_scene(self) -> None:
+        """Spawn one table and object per environment, plus the optional camera.
+
+        Uses ``self.cfg`` and ``self.selected_assets``; no explicit arguments.
+        Table size and position are XYZ triples; object orientation is a
+        ``(4,)`` quaternion in ``(w, x, y, z)`` order.
+
+        Returns:
+            None. Registers objects and the enabled recording camera in the scene.
+        """
         # use the same table config for all envs
         table_cfg = sim_utils.CuboidCfg(
             size=self.cfg.table_size,
@@ -103,6 +123,19 @@ class FrankaTableEnv(FrankaBaseEnv):
     def select_grasp(
         self, env_id: int, grasp_index: int = 0
     ) -> tuple[torch.Tensor, int]:
+        """Transform a cached grasp into the world frame using the current object pose.
+
+        Args:
+            env_id: Scalar environment index in ``[0, num_envs)``.
+            grasp_index: Scalar grasp index, wrapped modulo the asset's grasp count.
+
+        Returns:
+            World-from-grasp homogeneous transform shaped ``(4, 4)`` and the
+            resolved integer grasp index. Translation is in meters.
+
+        Raises:
+            RuntimeError: No grasps are loaded for the selected object.
+        """
         asset_id = self.selected_assets[env_id].asset_id
         grasp_poses = self.object_grasps.get(asset_id)
         if grasp_poses is None:

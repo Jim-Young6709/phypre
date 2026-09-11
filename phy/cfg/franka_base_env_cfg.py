@@ -121,7 +121,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     )
 
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=1,
+        num_envs=4,
         env_spacing=2.0,
         replicate_physics=False, # set to False allow loading different assets per env
     )
