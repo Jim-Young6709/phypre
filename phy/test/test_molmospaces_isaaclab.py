@@ -33,9 +33,9 @@ from typing import Any
 from isaaclab.app import AppLauncher
 
 
-ROOT = Path(__file__).resolve().parents[1]
-LOCAL_USD_ROOT = ROOT / "molmospaces" / "molmo_spaces_isaac" / "assets" / "usd"
-CACHE_USD_ROOT = Path.home() / ".molmospaces" / "usd"
+ROOT = Path(__file__).resolve().parents[3]
+OBJECT_USD_ROOT = ROOT / "set_object" / "usd"
+SCENE_USD_ROOT = ROOT / "set_scene" / "usd"
 DEFAULT_SCENE_NAME = "FloorPlan1_physics"
 DEFAULT_ASSET_ID = "Apple_1"
 DEFAULT_OBJECT_POSITION = (0.0, -1.0, 0.0)
@@ -45,7 +45,7 @@ Y_UP_TO_Z_UP_WXYZ = (math.sqrt(0.5), math.sqrt(0.5), 0.0, 0.0)
 
 
 parser = argparse.ArgumentParser(description="Load MolmoSpaces thor/ithor USDs in Isaac Lab.")
-parser.add_argument("--usd-root", type=Path, default=None, help="Root containing objects/ and scenes/.")
+parser.add_argument("--usd-root", type=Path, default=None, help="USD root containing thor/ or ithor/, or legacy objects/ and scenes/.")
 parser.add_argument("--scene", type=Path, default=None, help="Direct path to an ithor scene.usda.")
 parser.add_argument("--scene-name", default=DEFAULT_SCENE_NAME, help="Scene folder name, e.g. FloorPlan1_physics.")
 parser.add_argument("--asset", type=Path, default=None, help="Direct path to a thor *_mesh.usda or *_prim.usda.")
@@ -79,8 +79,8 @@ def candidate_usd_roots() -> list[Path]:
     if args_cli.usd_root is not None:
         return [args_cli.usd_root.expanduser()]
     return [
-        LOCAL_USD_ROOT,
-        CACHE_USD_ROOT,
+        OBJECT_USD_ROOT,
+        SCENE_USD_ROOT,
         ROOT / "assets" / "usd",
         Path.cwd() / "assets" / "usd",
     ]
@@ -108,19 +108,21 @@ def resolve_scene_path() -> Path | None:
         return scene_path
 
     for root in candidate_usd_roots():
+        scene_root = (root / "scenes" if (root / "scenes").is_dir() else root) / "ithor"
         scene_candidates: list[Path] = []
         for scene_name in normalize_scene_name(args_cli.scene_name):
             scene_candidates.extend(
                 [
-                    root / "scenes" / "ithor" / scene_name / "scene.usda",
-                    *sorted((root / "scenes" / "ithor").glob(f"*/{scene_name}/scene.usda")),
+                    scene_root / scene_name / "scene.usda",
+                    *sorted(scene_root.glob(f"*/{scene_name}/scene.usda")),
                 ]
             )
         if scene_path := first_existing(scene_candidates):
             return scene_path
 
     for root in candidate_usd_roots():
-        matches = sorted((root / "scenes" / "ithor").glob("**/scene.usda"))
+        scene_root = (root / "scenes" if (root / "scenes").is_dir() else root) / "ithor"
+        matches = sorted(scene_root.glob("**/scene.usda"))
         if matches:
             return matches[0]
     return None
@@ -128,7 +130,7 @@ def resolve_scene_path() -> Path | None:
 
 def resolve_asset_id_path(asset_id: str) -> Path | None:
     for root in candidate_usd_roots():
-        object_root = root / "objects" / "thor"
+        object_root = (root / "objects" if (root / "objects").is_dir() else root) / "thor"
         asset_candidates = [
             object_root / f"{asset_id}_mesh" / f"{asset_id}_mesh.usda",
             object_root / f"{asset_id}_prim" / f"{asset_id}_prim.usda",
@@ -189,7 +191,8 @@ def resolve_asset_path() -> Path | None:
         return asset_path
 
     for root in candidate_usd_roots():
-        matches = sorted((root / "objects" / "thor").glob("**/*_mesh.usda"))
+        object_root = (root / "objects" if (root / "objects").is_dir() else root) / "thor"
+        matches = sorted(object_root.glob("**/*_mesh.usda"))
         if matches:
             return matches[0]
     return None

@@ -48,9 +48,9 @@ except ModuleNotFoundError as exc:
     ObjectRetriever = None
 
 
-ROOT = Path(__file__).resolve().parents[1]
-LOCAL_USD_ROOT = ROOT / "molmospaces" / "molmo_spaces_isaac" / "assets" / "usd"
-CACHE_USD_ROOT = Path.home() / ".molmospaces" / "usd"
+ROOT = Path(__file__).resolve().parents[3]
+OBJECT_USD_ROOT = ROOT / "set_object" / "usd"
+SCENE_USD_ROOT = ROOT / "set_scene" / "usd"
 DEFAULT_SCENE_NAME = "FloorPlan1_physics"
 DEFAULT_ASSET_ID = "Apple_1"
 DEFAULT_OBJECT_POSITION = (0.0, -1.0, 0.0)
@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="View MolmoSpaces ithor scenes and thor objects in Viser.")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--usd-root", type=Path, default=None, help="Root containing objects/ and scenes/.")
+    parser.add_argument("--usd-root", type=Path, default=None, help="USD root containing thor/ or ithor/, or legacy objects/ and scenes/.")
     parser.add_argument("--scene", type=Path, default=None, help="Direct path to an ithor scene.usda.")
     parser.add_argument("--scene-name", default=DEFAULT_SCENE_NAME)
     parser.add_argument("--object", type=Path, default=None, help="Direct path to a thor *_mesh.usda or *_prim.usda.")
@@ -136,8 +136,8 @@ def candidate_usd_roots(args: argparse.Namespace) -> list[Path]:
     if args.usd_root is not None:
         return [args.usd_root.expanduser()]
     return [
-        LOCAL_USD_ROOT,
-        CACHE_USD_ROOT,
+        OBJECT_USD_ROOT,
+        SCENE_USD_ROOT,
         ROOT / "assets" / "usd",
         Path.cwd() / "assets" / "usd",
     ]
@@ -154,7 +154,7 @@ def discover_scenes(args: argparse.Namespace) -> dict[str, Path]:
         if path.is_file():
             scenes[path.parent.name] = path
     for root in candidate_usd_roots(args):
-        scene_root = root / "scenes" / "ithor"
+        scene_root = (root / "scenes" if (root / "scenes").is_dir() else root) / "ithor"
         for path in sorted(scene_root.glob("**/scene.usda")):
             scenes.setdefault(path.parent.name, path.absolute())
     return scenes
@@ -167,7 +167,7 @@ def discover_objects(args: argparse.Namespace) -> dict[str, Path]:
         if path.is_file():
             objects[asset_id_from_path(path)] = path
     for root in candidate_usd_roots(args):
-        object_root = root / "objects" / "thor"
+        object_root = (root / "objects" if (root / "objects").is_dir() else root) / "thor"
         for pattern in ("**/*_mesh.usda", "**/*_prim.usda"):
             for path in sorted(object_root.glob(pattern)):
                 asset_id = asset_id_from_path(path)
@@ -416,6 +416,7 @@ def candidate_grasp_roots(args: argparse.Namespace) -> list[Path]:
     roots: list[Path] = []
     if args.grasp_root is not None:
         roots.append(args.grasp_root.expanduser())
+    roots.append(ROOT / "set_grasp")
     for env_name in ("MLSPACES_ASSETS_DIR", "MLSPACES_CACHE_DIR"):
         env_value = os.environ.get(env_name)
         if env_value:

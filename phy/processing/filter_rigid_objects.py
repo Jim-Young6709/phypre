@@ -2,10 +2,11 @@
 
 Run from ``phypre`` with the Isaac Lab Python environment:
 
-    python -m phy.filter_rigid_objects
+    python -m phy.processing.filter_rigid_objects
 
-Then add ``env.usd_root=rigid_object_set`` to the existing datagen command.
-The output preserves ``objects/thor/<variant>/<variant>.usda`` and textures,
+The default output is ``set_object/usd/rigid`` at the workspace root,
+which is also the default object set for datagen.
+The output preserves ``thor/<variant>/<variant>.usda`` and textures,
 copying the same preferred variant selected by the loader (mesh, prim, base).
 Asset IDs stay unchanged, so the existing grasp cache and metadata still apply.
 The output directory must be empty to prevent stale assets surviving a rerun.
@@ -24,6 +25,7 @@ from pxr import Tf, Usd, UsdPhysics
 
 from phy.utils.assets import (
     DEFAULT_USD_ROOT_ALL,
+    DEFAULT_USD_ROOT_GRASP,
     discover_thor_assets,
     load_asset_grasps,
 )
@@ -64,24 +66,28 @@ def main() -> None:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "rigid_object_set",
+        default=DEFAULT_USD_ROOT_GRASP,
     )
     args = parser.parse_args()
     source_root = args.usd_root.expanduser().resolve()
     output_root = args.output_root.expanduser().resolve()
+    source_objects = (
+        source_root / "objects" if (source_root / "objects").is_dir() else source_root
+    )
+    source_objects /= "thor"
     if (
         output_root == source_root
-        or source_root in output_root.parents
         or output_root in source_root.parents
+        or output_root.is_relative_to(source_objects)
     ):
-        parser.error("Source and output roots must be separate directory trees.")
+        parser.error("Output must not contain the source root or be inside its THOR objects.")
     if output_root.exists() and (
         not output_root.is_dir() or any(output_root.iterdir())
     ):
         parser.error(f"Output directory must be empty: {output_root}")
     assets = discover_thor_assets(source_root)
     if not assets:
-        parser.error(f"No THOR USD assets found under {source_root / 'objects/thor'}")
+        parser.error(f"No THOR USD assets found under {source_objects}")
 
     accepted = []
     rejected = []

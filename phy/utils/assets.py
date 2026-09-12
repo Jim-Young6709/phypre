@@ -19,8 +19,8 @@ from .transforms import wxyz_to_matrix
 ROOT = (
     Path(__file__).resolve().parents[3]
 )  # TODO: this is very much overfit to the current folder structure
-DEFAULT_USD_ROOT_ALL = ROOT / "molmospaces" / "molmo_spaces_isaac" / "assets" / "usd"
-DEFAULT_USD_ROOT_GRASP = ROOT / "phypre" / "rigid_object_set"
+DEFAULT_USD_ROOT_ALL = ROOT / "set_object" / "usd"
+DEFAULT_USD_ROOT_GRASP = DEFAULT_USD_ROOT_ALL / "rigid"
 METADATA_PATHS = (
     ROOT
     / "molmospaces"
@@ -30,7 +30,7 @@ METADATA_PATHS = (
     / "resources"
     / "usd_assets_metadata.json",
 )
-GRASP_ROOT = Path.home() / ".cache" / "molmo-spaces-resources"
+GRASP_ROOT = ROOT / "set_grasp"
 
 
 @dataclass(frozen=True) # frozen to prevent accidental mutation of the asset data
@@ -74,7 +74,10 @@ def _variant_rank(path: Path) -> int:
 
 def discover_thor_assets(usd_root: str | Path = DEFAULT_USD_ROOT_ALL) -> list[ThorAsset]:
     """Discover one preferred USD variant per THOR asset in a USD root."""
-    object_root = Path(usd_root).expanduser() / "objects" / "thor"
+    object_root = Path(usd_root).expanduser()
+    if (object_root / "objects").is_dir():
+        object_root /= "objects"
+    object_root /= "thor"
     if not object_root.is_dir():
         return []
 
@@ -124,7 +127,7 @@ def object_height(
 def load_asset_grasps(asset_id: str, num_grasps: int = 0) -> torch.Tensor | None:
     """Load object-relative grasp transforms for one asset."""
     pattern = f"*/{asset_id}/{asset_id}_grasps_filtered.npz"
-    paths = sorted((GRASP_ROOT / "grasps" / "droid").glob(pattern))
+    paths = sorted((GRASP_ROOT / "droid").glob(pattern))
     if not paths:
         return None
 
