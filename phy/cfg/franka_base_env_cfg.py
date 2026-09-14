@@ -90,17 +90,17 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     eef_ik_damping = 0.1
     eef_ik_nullspace_gain = 0.05
 
+    # Select the Franka asset variant with a Robotiq 2F-85 gripper.
+    use_robotiq_gripper = True
+
     franka_joint_action_scale = 0.6
-    gripper_action_scale =0.1
+    gripper_action_scale = 0.6 if use_robotiq_gripper else 0.1 # robotiq gripper's movement is in radians, while panda gripper's movement is in meters
     dof_velocity_scale = 0.1 # rescale joint velocity so the variable is on the same order of magnitude as the normalized joint position [-1, 1]
     joint_reset_noise = 0.125
 
     action_space = 7 if use_eef_control else 8  # joint control: 7 arm joints + 1 scalar gripper action ; eef_control: 3 delta XYZ + 3 delta axis-angle + 1 scalar gripper action
     observation_space = 23 if use_eef_control else 24  # joint state, joint velocity, and previous action
     state_space = 0 # critic specific state space, for privileged information
-
-    # Select the Franka asset variant with a Robotiq 2F-85 gripper.
-    use_robotiq_gripper = False
 
     sim: SimulationCfg = SimulationCfg(
         dt=sim_dt,

@@ -23,6 +23,7 @@ from isaaclab.utils.math import (
     sample_uniform,
     subtract_frame_transforms,
 )
+from pxr import UsdPhysics
 
 from phy.cfg.franka_base_env_cfg import FrankaBaseEnvCfg
 from phy.utils.eef_ctrl import compute_dof_pos_delta
@@ -34,9 +35,18 @@ class FrankaBaseEnv(DirectRLEnv):
     cfg: FrankaBaseEnvCfg
 
     def __init__(self, cfg: FrankaBaseEnvCfg, render_mode: str | None = None, **kwargs):
+        # cfg overrides
         if cfg.use_eef_control:
             cfg.action_space = 7
             cfg.observation_space = 2 * (len(cfg.arm_joint_names) + 1) + 7
+        else:
+            cfg.action_space = len(cfg.arm_joint_names) + 1
+            cfg.observation_space = 3 * (len(cfg.arm_joint_names) + 1)
+
+        if cfg.use_robotiq_gripper:
+            cfg.gripper_action_scale = 0.6
+        else:
+            cfg.gripper_action_scale = 0.1 # robotiq gripper's movement is in radians, while panda gripper's movement is in meters
 
         super().__init__(cfg, render_mode, **kwargs) # will call setup scene
 
@@ -203,6 +213,21 @@ class FrankaBaseEnv(DirectRLEnv):
         self.robot = Articulation(self.cfg.robot_cfg)
         spawn_ground_plane(prim_path=self.cfg.ground_prim_path, cfg=GroundPlaneCfg())
         self.scene.clone_environments(copy_from_source=True) # each clone will be an independent copy, under current setting only robot is copied across all envs
+        if self.cfg.use_robotiq_gripper:
+            # Disable only Robotiq-internal collisions; keep arm self-collisions
+            # and collisions between the arm, gripper, and scene enabled.
+            for env_path in self.scene.env_prim_paths:
+                gripper_prim = self.scene.stage.GetPrimAtPath(
+                    f"{env_path}/Robot/Robotiq_2F_85_edit/Robotiq_2F_85"
+                )
+                gripper_bodies = [
+                    prim for prim in gripper_prim.GetChildren()
+                    if prim.HasAPI(UsdPhysics.RigidBodyAPI)
+                ]
+                for index, body in enumerate(gripper_bodies):
+                    filtered_pairs = UsdPhysics.FilteredPairsAPI.Apply(body).CreateFilteredPairsRel()
+                    for other_body in gripper_bodies[index + 1 :]:
+                        filtered_pairs.AddTarget(other_body.GetPath())
         self.scene.articulations["robot"] = self.robot
 
         light_cfg = sim_utils.DomeLightCfg(intensity=self.cfg.light_intensity, color=self.cfg.light_color)
@@ -390,7 +415,7 @@ class FrankaBaseEnv(DirectRLEnv):
             self.robot_dof_lower_limits[env_ids],
             self.robot_dof_upper_limits[env_ids],
         )
-        gripper_pos = joint_pos[:, self.gripper_dof_index : self.gripper_dof_index + 1]
+        gripper_pos = joint_pos[:, self.gripper_dof_index : self.gripper_dof_index + 1].clone()
         joint_pos[:, self.gripper_dof_indices] = gripper_pos.expand(-1, len(self.gripper_dof_indices))
         joint_vel = torch.zeros_like(joint_pos)
 
