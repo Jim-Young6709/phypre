@@ -25,7 +25,7 @@ class FrankaTableDatagenCfg(FrankaTableEnvCfg):
     rot_noise_std: float = 0.03
     init_ik_steps: int = 100
     reach_steps: int = 120
-    close_steps: int = 30
+    close_steps: int = 90
     lift_steps: int = 120
     lift_height: float = 0.20
     open_width: float = 0.04 # open width of one finger, the gripper open width is 2x the amount, 0.08 m is the maximum gripper open width
