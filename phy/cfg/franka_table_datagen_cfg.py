@@ -28,8 +28,8 @@ class FrankaTableDatagenCfg(FrankaTableEnvCfg):
     close_steps: int = 90
     lift_steps: int = 120
     lift_height: float = 0.20
-    open_width: float = 0.04 # open width of one finger, the gripper open width is 2x the amount, 0.08 m is the maximum gripper open width
-    closed_width: float = 0.0
+    open_width: float = 0.0 if FrankaTableEnvCfg.use_robotiq_gripper else 0.04 # robotiq gripper: open width in radians ; panda gripper: open width of one finger, the gripper open width is 2x the amount, 0.08 m is the maximum gripper open width
+    closed_width: float = 0.8203 if FrankaTableEnvCfg.use_robotiq_gripper else 0.0
 
     output_hdf5: str = "outputs/frankatable/frankatable_datagen.hdf5"
     append: bool = False # set to false will overwrite the existing hdf5 file

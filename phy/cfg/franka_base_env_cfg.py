@@ -94,7 +94,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     use_robotiq_gripper = True
 
     franka_joint_action_scale = 0.6
-    gripper_action_scale = 0.6 if use_robotiq_gripper else 0.1 # robotiq gripper's movement is in radians, while panda gripper's movement is in meters
+    gripper_action_scale = 1.0 if use_robotiq_gripper else 0.1 # robotiq gripper's movement is in radians, while panda gripper's movement is in meters
     dof_velocity_scale = 0.1 # rescale joint velocity so the variable is on the same order of magnitude as the normalized joint position [-1, 1]
     joint_reset_noise = 0.125
 

@@ -50,6 +50,13 @@ class FrankaTableDatagen:
         generator: torch.Generator,
     ) -> None:
         from phy.franka_table import FrankaTableEnv
+        # cfg overrides
+        if cfg.use_robotiq_gripper:
+            cfg.open_width = 0.0
+            cfg.closed_width = 0.8203
+        else:
+            cfg.open_width = 0.04
+            cfg.closed_width = 0.0
 
         self.cfg = cfg
         self.h5_file = h5_file
