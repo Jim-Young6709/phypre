@@ -18,7 +18,8 @@ class FrankaTableDatagenCfg(FrankaTableEnvCfg):
     grasp_index: int = 0
     debug_grasp_vis: bool = False  # GUI: green grasp and cyan pregrasp grippers.
 
-    gripper_ik_offset: float = 0.155 if FrankaTableEnvCfg.use_robotiq_gripper else 0.1025  # Meters from panda_hand to fingertip midpoint along local +Z.
+    # Gripper values are selected from cfg.use_robotiq_gripper by FrankaTableDatagen.
+    gripper_ik_offset: float = 0.155  # Meters from panda_hand to fingertip midpoint along local +Z.
     pregrasp_offset: float = 0.1
     pregrasp_axis: str = "-z"
     pos_noise_std: float = 0.01
@@ -28,8 +29,8 @@ class FrankaTableDatagenCfg(FrankaTableEnvCfg):
     close_steps: int = 90
     lift_steps: int = 120
     lift_height: float = 0.20
-    open_width: float = 0.0 if FrankaTableEnvCfg.use_robotiq_gripper else 0.04 # robotiq gripper: open width in radians ; panda gripper: open width of one finger, the gripper open width is 2x the amount, 0.08 m is the maximum gripper open width
-    closed_width: float = 0.8203 if FrankaTableEnvCfg.use_robotiq_gripper else 0.0
+    open_width: float = 0.0 # robotiq gripper: open width in radians ; panda gripper: open width of one finger, the gripper open width is 2x the amount, 0.08 m is the maximum gripper open width
+    closed_width: float = 0.8203
 
     output_hdf5: str = "outputs/frankatable/frankatable_datagen.hdf5"
     append: bool = False # set to false will overwrite the existing hdf5 file
