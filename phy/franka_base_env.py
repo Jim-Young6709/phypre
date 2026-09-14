@@ -44,7 +44,7 @@ class FrankaBaseEnv(DirectRLEnv):
             cfg.observation_space = 3 * (len(cfg.arm_joint_names) + 1)
 
         if cfg.use_robotiq_gripper:
-            cfg.gripper_action_scale = 0.6
+            cfg.gripper_action_scale = 2.0
         else:
             cfg.gripper_action_scale = 0.1 # robotiq gripper's movement is in radians, while panda gripper's movement is in meters
 
