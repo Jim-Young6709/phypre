@@ -19,6 +19,7 @@ import argparse
 import json
 import re
 import sys
+import traceback
 from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -407,6 +408,11 @@ def main() -> None:
             generate(cfg)
 
         run()
+    except Exception:
+        # Kit's fast shutdown can terminate before Python prints the traceback.
+        traceback.print_exc()
+        sys.stderr.flush()
+        raise
     finally:
         simulation_app.close()
 
