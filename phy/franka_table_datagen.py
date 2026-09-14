@@ -54,9 +54,11 @@ class FrankaTableDatagen:
         if cfg.use_robotiq_gripper:
             cfg.open_width = 0.0
             cfg.closed_width = 0.8203
+            cfg.gripper_ik_offset = 0.155
         else:
             cfg.open_width = 0.04
             cfg.closed_width = 0.0
+            cfg.gripper_ik_offset = 0.1025
 
         self.cfg = cfg
         self.h5_file = h5_file
