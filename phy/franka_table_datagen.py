@@ -197,7 +197,7 @@ class FrankaTableDatagen:
         # give it a few steps to stablize IK physics
         for _ in range(self.cfg.init_ik_steps):
             env.step(env.make_eef_w_actions(self.pregrasp_pose_w, self.open_width))
-        self.print_control_errors("pregrasp", self.pregrasp_pose_w)
+        self.print_control_errors("pregrasp", self.pregrasp_pose_w, self.open_width)
 
     def collect_trajectories(self) -> None:
         """Record the reach, close, and lift phases for the batch."""
@@ -221,14 +221,12 @@ class FrankaTableDatagen:
             ] + alpha * self.grasp_pose_w[:, :3]
             self.execute_step(target_pose_w, self.open_width, PHASE_IDS["reach"])
         if cfg.reach_steps > 0:
-            self.print_control_errors("reach", target_pose_w)
+            self.print_control_errors("reach", target_pose_w, self.open_width)
 
         for step in range(cfg.close_steps):
-            alpha = (step + 1) / cfg.close_steps
-            gripper_width = (1.0 - alpha) * self.open_width + alpha * self.closed_width
-            self.execute_step(self.grasp_pose_w, gripper_width, PHASE_IDS["close"])
+            self.execute_step(self.grasp_pose_w, self.closed_width, PHASE_IDS["close"])
         if cfg.close_steps > 0:
-            self.print_control_errors("close", self.grasp_pose_w)
+            self.print_control_errors("close", self.grasp_pose_w, self.closed_width)
 
         for step in range(cfg.lift_steps):
             alpha = (step + 1) / cfg.lift_steps
@@ -236,10 +234,12 @@ class FrankaTableDatagen:
             target_pose_w[:, 2] += cfg.lift_height * alpha
             self.execute_step(target_pose_w, self.closed_width, PHASE_IDS["lift"])
         if cfg.lift_steps > 0:
-            self.print_control_errors("lift", target_pose_w)
+            self.print_control_errors("lift", target_pose_w, self.closed_width)
 
-    def print_control_errors(self, phase: str, target_pose_w: torch.Tensor) -> None:
-        """Print final hand-pose tracking error lists in environment-index order."""
+    def print_control_errors(
+        self, phase: str, target_pose_w: torch.Tensor, gripper_width: torch.Tensor
+    ) -> None:
+        """Print hand-pose and per-finger-width errors in environment-index order."""
         from isaaclab.utils.math import quat_error_magnitude
 
         actual_pose_w = self.env.robot.data.body_pose_w[:, self.env._eef_body_id]
@@ -249,9 +249,15 @@ class FrankaTableDatagen:
         rotation_error = torch.rad2deg(
             quat_error_magnitude(target_pose_w[:, 3:7], actual_pose_w[:, 3:7])
         ).tolist()
+        gripper_error = torch.abs(
+            gripper_width[:, 0]
+            - self.env.robot.data.joint_pos[:, self.env.gripper_dof_index]
+        ).tolist()
         print(
             f"[INFO] {phase} control errors (env-index order): "
-            f"position (m)={position_error} \nrotation (deg)={rotation_error}"
+            f"\nposition (m)=[{', '.join(f'{error:.4f}' for error in position_error)}]"
+            f"\nrotation (deg)=[{', '.join(f'{error:.4f}' for error in rotation_error)}]"
+            f"\ngripper (m, per-finger)=[{', '.join(f'{error:.4f}' for error in gripper_error)}]"
         )
 
     def execute_step(
