@@ -4,7 +4,8 @@ Run from ``phypre`` in the ``phy`` environment:
 
     python -m phy.test.visualize_object_grasps
 
-Open http://localhost:8080 and use Previous Object / Next Object.
+Open http://localhost:8080 and use Previous Object / Next Object, or select an
+Asset and click Show Asset.
 Objects use a plain mesh material; no Isaac Sim or physics is started.
 """
 
@@ -44,6 +45,7 @@ class ObjectGraspViewer:
         self.assets = discover_thor_assets(usd_root)
         if not self.assets:
             raise RuntimeError(f"No THOR objects found under {usd_root}")
+        self.asset_ids = [asset.asset_id for asset in self.assets]
         self.index = 0
         self.lock = threading.Lock()
         self.center = np.zeros(3)
@@ -52,6 +54,8 @@ class ObjectGraspViewer:
         self.status = server.gui.add_markdown("")
         previous = server.gui.add_button("Previous Object")
         next_object = server.gui.add_button("Next Object")
+        self.asset_selector = server.gui.add_dropdown("Asset", options=self.asset_ids)
+        jump = server.gui.add_button("Show Asset")
 
         @previous.on_click
         def _previous(_event):
@@ -60,6 +64,10 @@ class ObjectGraspViewer:
         @next_object.on_click
         def _next(_event):
             self.show_object(1)
+
+        @jump.on_click
+        def _jump(_event):
+            self.show_object(asset_id=self.asset_selector.value)
 
         @server.on_client_connect
         def _connect(client):
@@ -72,9 +80,13 @@ class ObjectGraspViewer:
             client.camera.position = self.center + self.distance * np.array([1, -1, 0.7])
             client.camera.look_at = self.center
 
-    def show_object(self, step: int = 0) -> None:
+    def show_object(self, step: int = 0, asset_id: str | None = None) -> None:
         with self.lock:
-            index = (self.index + step) % len(self.assets)
+            index = (
+                self.asset_ids.index(asset_id)
+                if asset_id is not None
+                else (self.index + step) % len(self.assets)
+            )
             asset = self.assets[index]
             raw_mesh = extract_usd_mesh(str(asset.usd_path), False, sys.maxsize)
             mesh, world_from_object = grounded_object_mesh(
@@ -110,6 +122,7 @@ class ObjectGraspViewer:
                             line_width=3.0,
                         )
                 self.index = index
+                self.asset_selector.value = asset.asset_id
                 self.status.content = (
                     f"**{asset.asset_id}**  \n"
                     f"Object {index + 1}/{len(self.assets)} · Showing {count}/{total_count} grasps"
