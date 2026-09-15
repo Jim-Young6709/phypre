@@ -49,6 +49,8 @@ class FrankaTableDatagen:
         active_count: int,
         generator: torch.Generator,
     ) -> None:
+        from isaaclab.sim import create_new_stage
+
         from phy.franka_table import FrankaTableEnv
         # cfg overrides
         if cfg.use_robotiq_gripper:
@@ -83,6 +85,8 @@ class FrankaTableDatagen:
             env_cfg.episode_length_s,
             (num_control_steps + 2) * env_cfg.sim.dt * env_cfg.decimation,
         )
+        # env.close() leaves the stage and timeline alive between batches.
+        create_new_stage()
         self.env = FrankaTableEnv(env_cfg)
         self.recorder = DebugVideoRecorder(
             cfg.enable_recording_camera,
@@ -196,6 +200,14 @@ class FrankaTableDatagen:
         """Set the initial IK joint state and let the robot settle at the pregrasp."""
         env = self.env
         pregrasp_arm_targets, success = env.franka_ik(self.pregrasp_pose_w)
+        num_below_table = (self.pregrasp_pose_w[:, 2] < 0.05).sum().item()
+        num_ik_failed = (~success).sum().item()
+        print(
+            f"[INFO] Batch pregrasps below z=0.05 m: {num_below_table}/{env.num_envs} "
+            f"({num_below_table / env.num_envs:.1%})\n"
+            f"[INFO] Batch pregrasp IK failure rate: {num_ik_failed}/{env.num_envs} "
+            f"({num_ik_failed / env.num_envs:.1%})"
+        )
         if not torch.all(success):
             failed_env_ids = torch.nonzero(~success, as_tuple=False).flatten().tolist()
             print("----------------------------------------------------------------")
@@ -242,12 +254,12 @@ class FrankaTableDatagen:
                 :, :3
             ] + alpha * self.grasp_pose_w[:, :3]
             self.execute_step(target_pose_w, self.open_width, PHASE_IDS["reach"])
-        if cfg.reach_steps > 0:
+        if cfg.reach_steps > 0 and cfg.print_ctrl_err:
             self.print_control_errors("reach", target_pose_w, self.open_width)
 
         for step in range(cfg.close_steps):
             self.execute_step(self.grasp_pose_w, self.closed_width, PHASE_IDS["close"])
-        if cfg.close_steps > 0:
+        if cfg.close_steps > 0 and cfg.print_ctrl_err:
             self.print_control_errors("close", self.grasp_pose_w, self.closed_width)
 
         for step in range(cfg.lift_steps):
@@ -255,7 +267,7 @@ class FrankaTableDatagen:
             target_pose_w = self.grasp_pose_w.clone()
             target_pose_w[:, 2] += cfg.lift_height * alpha
             self.execute_step(target_pose_w, self.closed_width, PHASE_IDS["lift"])
-        if cfg.lift_steps > 0:
+        if cfg.lift_steps > 0 and cfg.print_ctrl_err:
             self.print_control_errors("lift", target_pose_w, self.closed_width)
 
     def print_control_errors(

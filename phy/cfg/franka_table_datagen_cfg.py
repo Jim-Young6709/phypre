@@ -38,3 +38,6 @@ class FrankaTableDatagenCfg(FrankaTableEnvCfg):
     record_video_envs: int = 4
     video_fps: int = 30
     video_every: int = 2
+
+    # debug utils
+    print_ctrl_err: bool = False
