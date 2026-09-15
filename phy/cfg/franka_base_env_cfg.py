@@ -62,11 +62,11 @@ def make_franka_robot_cfg(use_robotiq_gripper: bool = False) -> ArticulationCfg:
                 },
                 stiffness={
                     "panda_joint[1-7]": 1000.0,
-                    gripper_joint_expr: 2e3,
+                    gripper_joint_expr: 17.0 if use_robotiq_gripper else 2e3,
                 },
                 damping={
                     "panda_joint[1-7]": 50.0,
-                    gripper_joint_expr: 1e2,
+                    gripper_joint_expr: 0.02 if use_robotiq_gripper else 1e2,
                 },
             ),
         },
