@@ -9,8 +9,7 @@ For grasp/pregrasp GUI markers, pass ``env.debug_grasp_vis=true`` without ``--he
 
 
 TODO:
-1. data filter detection mechanism
-2. if IK fail just filter out the demo for that env
+1. if IK fail just filter out the demo for that env
 """
 
 from __future__ import annotations
@@ -93,20 +92,33 @@ class FrankaTableDatagen:
             cfg.record_video_envs,
         )
 
-    def run(self) -> None:
-        """Initialize, collect, and save one batch, then release its resources."""
+    def run(self) -> int:
+        """Save successful demos from one batch and return the number saved."""
         try:
             self.env.sim.set_camera_view(eye=[2.2, -2.2, 1.6], target=[0.55, 0.0, 0.45])
             self.env.reset()
             self.select_grasp_poses()
             self.initialize_pregrasp()
+            initial_object_heights = torch.stack(
+                [obj.data.root_pose_w[0, 2] for obj in self.env.objects]
+            )
             self.collect_trajectories()
-            for env_id in range(self.env.num_envs):
-                self.write_demo(env_id)
+            final_object_heights = torch.stack(
+                [obj.data.root_pose_w[0, 2] for obj in self.env.objects]
+            )
+            successful_env_ids = torch.nonzero(
+                final_object_heights >= initial_object_heights + 0.05,
+                as_tuple=False,
+            ).flatten().tolist()
+            for demo_offset, env_id in enumerate(successful_env_ids):
+                self.write_demo(env_id, self.first_demo_id + demo_offset)
+            num_successes = len(successful_env_ids)
             self.h5_file.flush()
             print(
-                f"[INFO] Wrote demos {self.first_demo_id}..{self.first_demo_id + self.env.num_envs - 1}"
+                f"[INFO] Batch success rate: {num_successes}/{self.env.num_envs} "
+                f"({num_successes / self.env.num_envs:.1%}); wrote {num_successes} demos"
             )
+            return num_successes
         finally:
             if self._grasp_debug_draw is not None:
                 self._grasp_debug_draw.clear_lines()
@@ -300,11 +312,11 @@ class FrankaTableDatagen:
             self.buffer[key].append(value.detach().cpu().numpy().astype(np.float32))
         self.buffer["phase"].append(phase_id)
 
-    def write_demo(self, env_id: int) -> None:
+    def write_demo(self, env_id: int, demo_id: int) -> None:
         """Write one environment's trajectory and asset metadata to HDF5."""
         env = self.env
         group = self.h5_file.require_group("data").create_group(
-            f"demo_{self.first_demo_id + env_id}"
+            f"demo_{demo_id}"
         )
         for key in (
             "actions",
@@ -381,11 +393,11 @@ def generate(cfg: FrankaTableDatagenCfg) -> None:
         remaining = cfg.num_trajectories
         while remaining:
             active_count = min(num_envs, remaining)
-            FrankaTableDatagen(
+            num_successes = FrankaTableDatagen(
                 cfg, h5_file, next_demo_id, active_count, generator
             ).run()
-            next_demo_id += active_count
-            remaining -= active_count
+            next_demo_id += num_successes
+            remaining -= num_successes
 
     print(f"[INFO] Finished {cfg.num_trajectories} trajectory demos -> {output_hdf5}")
 
