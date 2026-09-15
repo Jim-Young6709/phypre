@@ -46,7 +46,7 @@ class FrankaTableDatagen:
         cfg: FrankaTableDatagenCfg,
         h5_file: h5py.File,
         first_demo_id: int,
-        active_count: int,
+        max_demos: int,
         generator: torch.Generator,
     ) -> None:
         from isaaclab.sim import create_new_stage
@@ -65,12 +65,12 @@ class FrankaTableDatagen:
         self.cfg = cfg
         self.h5_file = h5_file
         self.first_demo_id = first_demo_id
+        self.max_demos = max_demos
         self.generator = generator
         self._grasp_debug_draw = None
 
         env_cfg = cfg.copy()
         env_cfg.start_object_idx += first_demo_id
-        env_cfg.scene.num_envs = active_count
         env_cfg.use_eef_control = True
         num_control_steps = sum(
             max(0, steps)
@@ -114,15 +114,17 @@ class FrankaTableDatagen:
                 final_object_heights >= initial_object_heights + 0.05,
                 as_tuple=False,
             ).flatten().tolist()
-            for demo_offset, env_id in enumerate(successful_env_ids):
-                self.write_demo(env_id, self.first_demo_id + demo_offset)
             num_successes = len(successful_env_ids)
+            saved_env_ids = successful_env_ids[: self.max_demos]
+            for demo_offset, env_id in enumerate(saved_env_ids):
+                self.write_demo(env_id, self.first_demo_id + demo_offset)
+            num_saved = len(saved_env_ids)
             self.h5_file.flush()
             print(
                 f"[INFO] Batch success rate: {num_successes}/{self.env.num_envs} "
-                f"({num_successes / self.env.num_envs:.1%}); wrote {num_successes} demos"
+                f"({num_successes / self.env.num_envs:.1%}); wrote {num_saved} demos"
             )
-            return num_successes
+            return num_saved
         finally:
             if self._grasp_debug_draw is not None:
                 self._grasp_debug_draw.clear_lines()
@@ -404,12 +406,11 @@ def generate(cfg: FrankaTableDatagenCfg) -> None:
         next_demo_id = next_demo_index(h5_file.require_group("data"))
         remaining = cfg.num_trajectories
         while remaining:
-            active_count = min(num_envs, remaining)
-            num_successes = FrankaTableDatagen(
-                cfg, h5_file, next_demo_id, active_count, generator
+            num_saved = FrankaTableDatagen(
+                cfg, h5_file, next_demo_id, remaining, generator
             ).run()
-            next_demo_id += num_successes
-            remaining -= num_successes
+            next_demo_id += num_saved
+            remaining -= num_saved
 
     print(f"[INFO] Finished {cfg.num_trajectories} trajectory demos -> {output_hdf5}")
 
