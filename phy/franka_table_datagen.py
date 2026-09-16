@@ -184,37 +184,69 @@ class FrankaTableDatagen:
         )
 
     def select_grasp_poses(self) -> None:
-        """Select and store grasp poses, perturbed pregrasps, and gripper targets."""
+        """Try grasps sequentially until pregrasp height and IK pass, or grasps run out."""
         env = self.env
         cfg = self.cfg
-        selected_grasps = [
-            env.select_grasp(
-                env_id,
-                cfg.grasp_index,
-            )
-            for env_id in range(env.num_envs)
+        grasp_counts = [
+            len(env.object_grasps[asset.asset_id]) for asset in env.selected_assets
         ]
-        grasp_transforms = torch.stack([transform for transform, _ in selected_grasps])
-        self.grasp_indices = [index for _, index in selected_grasps]
-        # Convert fingertip-midpoint grasps to panda_hand IK targets.
-        grasp_transforms = offset_and_perturb_transforms(
-            grasp_transforms,
-            cfg.gripper_ik_offset,
-            "-z",
-            0.0,
-            0.0,
-            self.generator,
-        )
-        pregrasp_transforms = offset_and_perturb_transforms(
-            grasp_transforms,
-            cfg.pregrasp_offset,
-            cfg.pregrasp_axis,
-            cfg.pos_noise_std,
-            cfg.rot_noise_std,
-            self.generator,
-        )
+        attempts = [0] * env.num_envs
+        self.grasp_indices = [0] * env.num_envs
+        self.ik_success = [False] * env.num_envs
+        self.init_pose_collision = [False] * env.num_envs
+        grasp_transforms = env.robot.data.joint_pos.new_empty((env.num_envs, 4, 4))
+        pregrasp_transforms = torch.empty_like(grasp_transforms)
+        self.pregrasp_arm_targets = env.robot.data.joint_pos[:, env.arm_dof_indices].clone()
+        pending = list(range(env.num_envs))
+        while pending:
+            height_retries = pending
+            while height_retries:
+                selected_grasps = [
+                    env.select_grasp(env_id, cfg.grasp_index + attempts[env_id])
+                    for env_id in height_retries
+                ]
+                # Convert fingertip-midpoint grasps to panda_hand IK targets.
+                candidates = offset_and_perturb_transforms(
+                    torch.stack([transform for transform, _ in selected_grasps]),
+                    cfg.gripper_ik_offset, "-z", 0.0, 0.0, self.generator,
+                )
+                pregrasps = offset_and_perturb_transforms(
+                    candidates, cfg.pregrasp_offset, cfg.pregrasp_axis,
+                    cfg.pos_noise_std, cfg.rot_noise_std, self.generator,
+                )
+                grasp_transforms[height_retries] = candidates
+                pregrasp_transforms[height_retries] = pregrasps
+                for env_id, (_, index), below_table in zip(
+                    height_retries, selected_grasps, (pregrasps[:, 2, 3] < 0.05).tolist()
+                ):
+                    attempts[env_id] += 1
+                    self.grasp_indices[env_id] = index
+                    self.init_pose_collision[env_id] = below_table
+                height_retries = [
+                    env_id for env_id in height_retries
+                    if self.init_pose_collision[env_id] and attempts[env_id] < grasp_counts[env_id]
+                ]
+
+            self.pregrasp_pose_w = poses_from_transforms(pregrasp_transforms)
+            # Keep full environment order for IK's root transforms and CUDA graphs.
+            # Exhausted low pregrasps still need joint targets for normal rollout.
+            arm_targets, success = env.franka_ik(self.pregrasp_pose_w)
+            self.pregrasp_arm_targets[pending] = arm_targets[pending]
+            for env_id, ik_success in zip(pending, success[pending].tolist()):
+                self.ik_success[env_id] = ik_success
+            pending = [
+                env_id for env_id in pending
+                if not self.ik_success[env_id] and attempts[env_id] < grasp_counts[env_id]
+            ]
+
+        failed_env_ids = [
+            env_id for env_id in range(env.num_envs)
+            if not self.ik_success[env_id] or self.init_pose_collision[env_id]
+        ]
+        if failed_env_ids:
+            print(f"[WARNING] Prefilter failed for env IDs {failed_env_ids}")
+
         self.grasp_pose_w = poses_from_transforms(grasp_transforms)
-        self.pregrasp_pose_w = poses_from_transforms(pregrasp_transforms)
         self.open_width = torch.full_like(self.grasp_pose_w[:, :1], cfg.open_width)
         self.closed_width = torch.full_like(self.grasp_pose_w[:, :1], cfg.closed_width)
         if cfg.debug_grasp_vis and env.sim.has_gui():
@@ -253,28 +285,18 @@ class FrankaTableDatagen:
     def initialize_pregrasp(self) -> None:
         """Set the initial IK joint state and let the robot settle at the pregrasp."""
         env = self.env
-        pregrasp_arm_targets, success = env.franka_ik(self.pregrasp_pose_w)
-        self.ik_success = success.tolist()
-        self.init_pose_collision = (self.pregrasp_pose_w[:, 2] < 0.05).tolist()
         num_below_table = sum(self.init_pose_collision)
-        num_ik_failed = (~success).sum().item()
+        num_ik_failed = env.num_envs - sum(self.ik_success)
         print(
             f"[INFO] Batch pregrasps below z=0.05 m: {num_below_table}/{env.num_envs} "
-            f"({num_below_table / env.num_envs:.1%})\n"
+            f"({num_below_table / env.num_envs:.1%}); "
+            f"env IDs {[i for i, below in enumerate(self.init_pose_collision) if below]}\n"
             f"[INFO] Batch pregrasp IK failure rate: {num_ik_failed}/{env.num_envs} "
-            f"({num_ik_failed / env.num_envs:.1%})"
+            f"({num_ik_failed / env.num_envs:.1%}); "
+            f"env IDs {[i for i, success in enumerate(self.ik_success) if not success]}"
         )
-        if not torch.all(success):
-            failed_env_ids = torch.nonzero(~success, as_tuple=False).flatten().tolist()
-            print("----------------------------------------------------------------")
-            print(
-                f"[WARNING] CuRobo IK failed for env IDs {failed_env_ids}; "
-                "continuing with the returned joint targets."
-            )
-            print("----------------------------------------------------------------")
-
         joint_pos = env.robot.data.joint_pos.clone()
-        joint_pos[:, env.arm_dof_indices] = pregrasp_arm_targets
+        joint_pos[:, env.arm_dof_indices] = self.pregrasp_arm_targets
         joint_pos[:, env.gripper_dof_indices] = self.open_width
         joint_pos = torch.clamp(
             joint_pos, env.robot_dof_lower_limits, env.robot_dof_upper_limits
