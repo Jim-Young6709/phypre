@@ -4,5 +4,6 @@ __pycache__/
 
 archive/
 outputs/
+logs/
 rigid_object_set/
 *.ipynb

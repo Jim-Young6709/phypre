@@ -30,3 +30,6 @@ Repository = "https://github.com/Jim-Young6709/phypre"
 
 [tool.setuptools.packages.find]
 include = ["phy*"]
+
+[tool.setuptools.package-data]
+"phy.cfg" = ["*.yaml"]
