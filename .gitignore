@@ -6,4 +6,5 @@ archive/
 outputs/
 logs/
 rigid_object_set/
+wandb/
 *.ipynb
