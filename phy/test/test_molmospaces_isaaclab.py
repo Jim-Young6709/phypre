@@ -74,6 +74,10 @@ simulation_app = app_launcher.app
 import isaaclab.sim as sim_utils  # noqa: E402
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane  # noqa: E402
 
+from phy.utils.assets import enable_fast_usd_checks
+
+enable_fast_usd_checks()
+
 
 def candidate_usd_roots() -> list[Path]:
     if args_cli.usd_root is not None:

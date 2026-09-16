@@ -33,6 +33,25 @@ METADATA_PATHS = (
 GRASP_ROOT = ROOT / "set_grasp"
 
 
+def enable_fast_usd_checks() -> None:
+    """Remove Isaac Lab's fixed polling delay without changing its installation."""
+    import asyncio
+
+    from isaaclab.sim.spawners.from_files import from_files
+    from isaaclab.utils import assets as lab_assets
+
+    def check_usd_path(usd_path, timeout=300, log_interval=30):
+        if Path(usd_path).is_file():
+            return True
+        # Await remote/missing-file checks directly, retaining the original timeout.
+        return asyncio.get_event_loop().run_until_complete(
+            lab_assets._is_usd_path_available(usd_path, timeout)
+        )
+
+    lab_assets.check_usd_path_with_timeout = check_usd_path
+    from_files.check_usd_path_with_timeout = check_usd_path
+
+
 @dataclass(frozen=True) # frozen to prevent accidental mutation of the asset data
 class ThorAsset:
     asset_id: str
