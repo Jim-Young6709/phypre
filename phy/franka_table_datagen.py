@@ -30,7 +30,11 @@ import numpy as np
 import torch
 
 from phy.utils.recording import DebugVideoRecorder, next_demo_index
-from phy.utils.transforms import offset_and_perturb_transforms, poses_from_transforms
+from phy.utils.transforms import (
+    offset_and_perturb_transforms,
+    poses_from_transforms,
+    transform_from_pos_wxyz,
+)
 
 if TYPE_CHECKING:
     from phy.cfg.franka_table_datagen_cfg import FrankaTableDatagenCfg
@@ -183,13 +187,49 @@ class FrankaTableDatagen:
             f"({num_other_failures / self.env.num_envs:.1%})"
         )
 
-    def select_grasp_poses(self) -> None:
-        """Try grasps sequentially until pregrasp height and IK pass, or grasps run out."""
+    def rank_grasp_poses(self) -> list[tuple[torch.Tensor, list[int]]]:
+        """Buffer the lowest-cost world-frame grasps and their original indices per env."""
         env = self.env
         cfg = self.cfg
-        grasp_counts = [
-            len(env.object_grasps[asset.asset_id]) for asset in env.selected_assets
-        ]
+        if cfg.max_pregrasp_filter_attempts < 1:
+            raise ValueError("max_pregrasp_filter_attempts must be at least 1")
+
+        hand_poses = env.robot.data.body_pose_w[:, env._eef_body_id]
+        tcp_transforms = transform_from_pos_wxyz(hand_poses[:, :3], hand_poses[:, 3:7])
+        # Library grasps use the fingertip midpoint, not the panda_hand origin.
+        tcp_transforms[:, :3, 3] += cfg.gripper_ik_offset * tcp_transforms[:, :3, 2]
+        ranked_grasps = []
+        for env_id, asset in enumerate(env.selected_assets):
+            object_pose = env.objects[env_id].data.root_pose_w[0]
+            object_transform = transform_from_pos_wxyz(object_pose[:3], object_pose[3:7])
+            local_grasps = env.object_grasps[asset.asset_id].to(object_pose)
+            grasps = object_transform @ local_grasps
+            tcp = tcp_transforms[env_id]
+            position_dist = torch.linalg.vector_norm(grasps[:, :3, 3] - tcp[:3, 3], dim=-1)
+            relative_rotation = tcp[:3, :3].T @ grasps[:, :3, :3]
+            cos_angle = (relative_rotation.diagonal(dim1=-2, dim2=-1).sum(-1) - 1.0) / 2.0
+            rotation_dist = torch.rad2deg(torch.acos(cos_angle.clamp(-1.0, 1.0)))
+            # Match MolmoSpace's COM heuristic: distance to the object frame origin.
+            object_dist = torch.linalg.vector_norm(local_grasps[:, :3, 3], dim=-1)
+            scores = (
+                cfg.grasp_pos_cost_weight * position_dist
+                + cfg.grasp_rot_cost_weight * rotation_dist
+                + cfg.grasp_vertical_cost_weight * grasps[:, 2, 2]
+                + cfg.grasp_com_dist_cost_weight * object_dist
+            )
+            indices = (torch.arange(len(grasps), device=grasps.device) + cfg.grasp_index) % len(grasps)
+            ranked_indices = indices[torch.argsort(scores[indices], stable=True)]
+            ranked_indices = ranked_indices[:cfg.max_pregrasp_filter_attempts]
+            ranked_grasps.append((grasps[ranked_indices], ranked_indices.tolist()))
+        return ranked_grasps
+
+    def select_grasp_poses(self) -> None:
+        """Try ranked grasps until pregrasp height and IK pass, or the buffer runs out."""
+        env = self.env
+        cfg = self.cfg
+        self.ranked_grasps = self.rank_grasp_poses()
+        # Each buffer holds min(available grasps, max_pregrasp_filter_attempts).
+        grasp_counts = [len(grasps) for grasps, _ in self.ranked_grasps]
         attempts = [0] * env.num_envs
         self.grasp_indices = [0] * env.num_envs
         self.ik_success = [False] * env.num_envs
@@ -202,7 +242,10 @@ class FrankaTableDatagen:
             height_retries = pending
             while height_retries:
                 selected_grasps = [
-                    env.select_grasp(env_id, cfg.grasp_index + attempts[env_id])
+                    (
+                        self.ranked_grasps[env_id][0][attempts[env_id]],
+                        self.ranked_grasps[env_id][1][attempts[env_id]],
+                    )
                     for env_id in height_retries
                 ]
                 # Convert fingertip-midpoint grasps to panda_hand IK targets.

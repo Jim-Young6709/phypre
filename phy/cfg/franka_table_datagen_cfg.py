@@ -15,7 +15,12 @@ class FrankaTableDatagenCfg(FrankaTableEnvCfg):
     require_grasps: bool = True
 
     num_trajectories: int = 4
-    grasp_index: int = 0
+    grasp_index: int = 0  # Starting index for breaking equal-score ties.
+    max_pregrasp_filter_attempts: int = 100
+    grasp_pos_cost_weight: float = 0.0
+    grasp_rot_cost_weight: float = 0.0
+    grasp_vertical_cost_weight: float = 2.0
+    grasp_com_dist_cost_weight: float = 8.0
     debug_grasp_vis: bool = False  # GUI: green grasp and cyan pregrasp grippers.
 
     # Gripper values are selected from cfg.use_robotiq_gripper by FrankaTableDatagen.
