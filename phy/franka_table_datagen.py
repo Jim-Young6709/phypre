@@ -6,6 +6,7 @@ Example:
 
 For video, also pass ``--enable_cameras env.enable_recording_camera=true``.
 For grasp/pregrasp GUI markers, pass ``env.debug_grasp_vis=true`` without ``--headless``.
+Per-batch object outcomes are written beside the HDF5 file under ``<stem>_logs/<run>/``.
 
 
 TODO:
@@ -20,6 +21,7 @@ import re
 import sys
 import traceback
 from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,7 +98,7 @@ class FrankaTableDatagen:
             cfg.record_video_envs,
         )
 
-    def run(self) -> int:
+    def run(self, report_path: Path) -> int:
         """Save successful demos from one batch and return the number saved."""
         try:
             self.env.sim.set_camera_view(eye=[2.2, -2.2, 1.6], target=[0.55, 0.0, 0.45])
@@ -120,6 +122,12 @@ class FrankaTableDatagen:
                 self.write_demo(env_id, self.first_demo_id + demo_offset)
             num_saved = len(saved_env_ids)
             self.h5_file.flush()
+            self.write_batch_report(
+                report_path,
+                final_object_heights - initial_object_heights,
+                successful_env_ids,
+                saved_env_ids,
+            )
             print(
                 f"[INFO] Batch success rate: {num_successes}/{self.env.num_envs} "
                 f"({num_successes / self.env.num_envs:.1%}); wrote {num_saved} demos"
@@ -130,6 +138,50 @@ class FrankaTableDatagen:
                 self._grasp_debug_draw.clear_lines()
             self.recorder.close()
             self.env.close()
+
+    def write_batch_report(
+        self,
+        path: Path,
+        height_gains: torch.Tensor,
+        successful_env_ids: list[int],
+        saved_env_ids: list[int],
+    ) -> None:
+        """Report lift outcomes and observed initialization issues for every object.
+
+        init_pose_collision means the target pregrasp world-frame z is below 0.05 m.
+        Initialization issues are diagnostics, not proof of why the lift failed.
+        """
+        demo_ids = {
+            env_id: self.first_demo_id + offset
+            for offset, env_id in enumerate(saved_env_ids)
+        }
+        num_other_failures = 0
+        with path.open("w", encoding="utf-8") as report:
+            for env_id, (asset, height_gain, pregrasp_z) in enumerate(
+                zip(self.env.selected_assets, height_gains.tolist(), self.pregrasp_pose_w[:, 2].tolist())
+            ):
+                success = env_id in successful_env_ids
+                reasons = []
+                if not success:
+                    if not self.ik_success[env_id]:
+                        reasons.append("ik")
+                    if self.init_pose_collision[env_id]:
+                        reasons.append("init_pose_collision")
+                    if not reasons:
+                        reasons.append("other_lift_below_threshold")
+                        num_other_failures += 1
+                report.write(
+                    f"{asset.asset_id}\t{'SUCCESS' if success else 'FAIL'}"
+                    f"\treason={','.join(reasons) or '-'}\tenv_id={env_id}"
+                    f"\tik={'PASS' if self.ik_success[env_id] else 'FAIL'}"
+                    f"\tpregrasp_z_m={pregrasp_z:.6f}\tlift_m={height_gain:.6f}"
+                    f"\tsaved_demo={demo_ids.get(env_id, '-')}\n"
+                )
+        print(f"[INFO] Batch object report -> {path}")
+        print(
+            f"[INFO] Batch other failure rate: {num_other_failures}/{self.env.num_envs} "
+            f"({num_other_failures / self.env.num_envs:.1%})"
+        )
 
     def select_grasp_poses(self) -> None:
         """Select and store grasp poses, perturbed pregrasps, and gripper targets."""
@@ -202,7 +254,9 @@ class FrankaTableDatagen:
         """Set the initial IK joint state and let the robot settle at the pregrasp."""
         env = self.env
         pregrasp_arm_targets, success = env.franka_ik(self.pregrasp_pose_w)
-        num_below_table = (self.pregrasp_pose_w[:, 2] < 0.05).sum().item()
+        self.ik_success = success.tolist()
+        self.init_pose_collision = (self.pregrasp_pose_w[:, 2] < 0.05).tolist()
+        num_below_table = sum(self.init_pose_collision)
         num_ik_failed = (~success).sum().item()
         print(
             f"[INFO] Batch pregrasps below z=0.05 m: {num_below_table}/{env.num_envs} "
@@ -233,7 +287,8 @@ class FrankaTableDatagen:
         # give it a few steps to stablize IK physics
         for _ in range(self.cfg.init_ik_steps):
             env.step(env.make_eef_w_actions(self.pregrasp_pose_w, self.open_width))
-        self.print_control_errors("pregrasp", self.pregrasp_pose_w, self.open_width)
+        if self.cfg.print_ctrl_err:
+            self.print_control_errors("pregrasp", self.pregrasp_pose_w, self.open_width)
 
     def collect_trajectories(self) -> None:
         """Record the reach, close, and lift phases for the batch."""
@@ -397,6 +452,11 @@ def generate(cfg: FrankaTableDatagenCfg) -> None:
 
     output_hdf5 = Path(cfg.output_hdf5).expanduser()
     output_hdf5.parent.mkdir(parents=True, exist_ok=True)
+    log_dir = (
+        output_hdf5.parent / f"{output_hdf5.stem}_logs"
+        / datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
+    )
+    log_dir.mkdir(parents=True)
     seed = cfg.seed or 0
     generator = torch.Generator(device=cfg.sim.device).manual_seed(seed)
     torch.manual_seed(seed)
@@ -405,12 +465,14 @@ def generate(cfg: FrankaTableDatagenCfg) -> None:
         write_root_attrs(h5_file, cfg)
         next_demo_id = next_demo_index(h5_file.require_group("data"))
         remaining = cfg.num_trajectories
+        batch_index = 0
         while remaining:
             num_saved = FrankaTableDatagen(
                 cfg, h5_file, next_demo_id, remaining, generator
-            ).run()
+            ).run(log_dir / f"batch_{batch_index:06d}.txt")
             next_demo_id += num_saved
             remaining -= num_saved
+            batch_index += 1
 
     print(f"[INFO] Finished {cfg.num_trajectories} trajectory demos -> {output_hdf5}")
 
