@@ -109,13 +109,9 @@ class FrankaTableDatagen:
             self.env.reset()
             self.select_grasp_poses()
             self.initialize_pregrasp()
-            initial_object_heights = torch.stack(
-                [obj.data.root_pose_w[0, 2] for obj in self.env.objects]
-            )
+            initial_object_heights = self.env.object.data.root_pose_w[:, 2].clone()
             self.collect_trajectories()
-            final_object_heights = torch.stack(
-                [obj.data.root_pose_w[0, 2] for obj in self.env.objects]
-            )
+            final_object_heights = self.env.object.data.root_pose_w[:, 2]
             successful_env_ids = torch.nonzero(
                 final_object_heights >= initial_object_heights + 0.05,
                 as_tuple=False,
@@ -200,7 +196,7 @@ class FrankaTableDatagen:
         tcp_transforms[:, :3, 3] += cfg.gripper_ik_offset * tcp_transforms[:, :3, 2]
         ranked_grasps = []
         for env_id, asset in enumerate(env.selected_assets):
-            object_pose = env.objects[env_id].data.root_pose_w[0]
+            object_pose = env.object.data.root_pose_w[env_id]
             object_transform = transform_from_pos_wxyz(object_pose[:3], object_pose[3:7])
             local_grasps = env.object_grasps[asset.asset_id].to(object_pose)
             grasps = object_transform @ local_grasps
@@ -436,9 +432,7 @@ class FrankaTableDatagen:
             "obs/joint_pos": env.robot.data.joint_pos,
             "obs/joint_vel": env.robot.data.joint_vel,
             "obs/eef_pose": env.robot.data.body_pose_w[:, env._eef_body_id],
-            "obs/object_pose": torch.stack(
-                [obj.data.root_pose_w[0] for obj in env.objects]
-            ),
+            "obs/object_pose": env.object.data.root_pose_w,
             "target_eef_pose": target_pose_w,
             "gripper_width": env.robot_dof_targets[:, env.gripper_dof_index, None],
         }
@@ -471,7 +465,7 @@ class FrankaTableDatagen:
         for key, pose in (
             ("grasp_pose", self.grasp_pose_w[env_id]),
             ("pregrasp_pose", self.pregrasp_pose_w[env_id]),
-            ("object_pose", env.objects[env_id].data.root_pose_w[0]),
+            ("object_pose", env.object.data.root_pose_w[env_id]),
         ):
             group.create_dataset(
                 key, data=pose.detach().cpu().numpy().astype(np.float32)

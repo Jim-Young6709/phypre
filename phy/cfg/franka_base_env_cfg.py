@@ -14,6 +14,10 @@ from isaaclab_assets.robots.franka import (
     FRANKA_ROBOTIQ_GRIPPER_CFG,
 )
 
+from phy.utils.assets import enable_fast_usd_checks
+
+enable_fast_usd_checks()
+
 
 def make_franka_robot_cfg(use_robotiq_gripper: bool = False) -> ArticulationCfg:
     """Build a Franka Panda configuration with IsaacGymEnvs Franka LEAP arm gains."""
@@ -99,7 +103,7 @@ class FrankaBaseEnvCfg(DirectRLEnvCfg):
     joint_reset_noise = 0.125
 
     action_space = 8  # joint control: 7 arm joints + 1 scalar gripper action ; eef_control: 3 delta XYZ + 3 delta axis-angle + 1 scalar gripper action
-    observation_space = 24  # joint state, joint velocity, and previous action
+    observation_space = 0  # Hydra-serializable placeholder; infer dimensions in the environment
     state_space = 0 # critic specific state space, for privileged information
 
     sim: SimulationCfg = SimulationCfg(

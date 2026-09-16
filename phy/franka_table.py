@@ -6,6 +6,7 @@ import isaaclab.sim as sim_utils
 import torch
 from isaaclab.assets import RigidObject, RigidObjectCfg
 from isaaclab.sensors import TiledCamera
+from pxr import UsdPhysics
 
 from phy.cfg.franka_table_env_cfg import FrankaTableEnvCfg
 from phy.franka_base_env import FrankaBaseEnv
@@ -38,18 +39,27 @@ class FrankaTableEnv(FrankaBaseEnv):
             ``(G, 4, 4)`` per loaded asset, where G is its grasp count.
         """
         self.asset_metadata = load_usd_asset_metadata()
+        self.object_orientation_offset = axis_rotation_wxyz(cfg.asset_axis_convention)
         self.selected_assets, self.object_grasps = select_env_assets(
-            discover_thor_assets(cfg.usd_root),
+            self._get_assets(cfg),
             cfg.scene.num_envs,
             cfg.start_object_idx,
             cfg.num_grasps,
             cfg.require_grasps,
         )
-        self.object_orientation_offset = axis_rotation_wxyz(
-            cfg.asset_axis_convention
-        )  # in case the asset's axis convention is different from Isaac Lab's, we add the offset to make everything consistent in Isaac Lab's convention (z is up)
-        self.objects = []
         super().__init__(cfg, render_mode, **kwargs)
+        object_env_paths = [
+            path.split("/Object/", 1)[0]
+            for path in self.object.root_physx_view.prim_paths
+        ]
+        if object_env_paths != list(self.scene.env_prim_paths):
+            raise RuntimeError(
+                "Expected exactly one object rigid body per environment, in environment order; "
+                f"got {object_env_paths}."
+            )
+
+    def _get_assets(self, cfg: FrankaTableEnvCfg):
+        return discover_thor_assets(cfg.usd_root)
 
     def _setup_task_scene(self) -> None:
         """Spawn one table and object per environment, plus the optional camera.
@@ -112,8 +122,25 @@ class FrankaTableEnv(FrankaBaseEnv):
                 translation=obj_init_position,
                 orientation=self.object_orientation_offset,
             )
-            self.objects.append(RigidObject(RigidObjectCfg(prim_path=prim_path)))
-            self.scene.rigid_objects[f"object_{env_id}"] = self.objects[-1]
+            bodies = sim_utils.get_all_matching_child_prims(
+                prim_path,
+                predicate=lambda prim: prim.HasAPI(UsdPhysics.RigidBodyAPI),
+                traverse_instance_prims=False,
+            )
+            if (
+                len(bodies) != 1
+                or str(bodies[0].GetParent().GetPath()) != f"{prim_path}/Geometry"
+            ):
+                raise RuntimeError(
+                    f"Asset {asset.asset_id!r} in {env_path} must have exactly one rigid body "
+                    "directly under Object/Geometry for batched access."
+                )
+
+        # THOR rigid bodies have asset-specific names below Geometry.
+        self.object = RigidObject(
+            RigidObjectCfg(prim_path="/World/envs/env_.*/Object/Geometry/.*")
+        )
+        self.scene.rigid_objects["object"] = self.object
 
         self._recording_camera = None
         if self.cfg.enable_recording_camera:
@@ -142,7 +169,7 @@ class FrankaTableEnv(FrankaBaseEnv):
             raise RuntimeError(f"No grasps loaded for env_{env_id} object {asset_id}.")
 
         pose_index = grasp_index % len(grasp_poses)
-        pose = self.objects[env_id].data.root_pose_w[0]
+        pose = self.object.data.root_pose_w[env_id]
         grasp_pose = grasp_poses[pose_index].to(pose)
         world_from_object = transform_from_pos_wxyz(pose[:3], pose[3:7])
         return world_from_object @ grasp_pose, pose_index

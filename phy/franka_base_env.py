@@ -36,12 +36,9 @@ class FrankaBaseEnv(DirectRLEnv):
 
     def __init__(self, cfg: FrankaBaseEnvCfg, render_mode: str | None = None, **kwargs):
         # cfg overrides
-        if cfg.use_eef_control:
-            cfg.action_space = 7
-            cfg.observation_space = 2 * (len(cfg.arm_joint_names) + 1) + 7
-        else:
-            cfg.action_space = len(cfg.arm_joint_names) + 1
-            cfg.observation_space = 3 * (len(cfg.arm_joint_names) + 1)
+        cfg.action_space = (6 if cfg.use_eef_control else len(cfg.arm_joint_names)) + 1
+        if cfg.observation_space in (None, 0):
+            cfg.observation_space = 2 * (len(cfg.arm_joint_names) + 1) + cfg.action_space
 
         if cfg.use_robotiq_gripper:
             cfg.gripper_action_scale = 2.0
@@ -69,10 +66,6 @@ class FrankaBaseEnv(DirectRLEnv):
         self.num_action_joints = (
             6 if self.cfg.use_eef_control else self.num_arm_actions
         ) + self.num_gripper_actions
-        if isinstance(self.cfg.action_space, int) and self.cfg.action_space != self.num_action_joints:
-            raise ValueError(
-                f"action_space={self.cfg.action_space} must match {self.num_action_joints} control actions."
-            )
 
         joint_pos_limits = self.robot.root_physx_view.get_dof_limits().to(self.device)
         self.robot_dof_lower_limits = joint_pos_limits[..., 0]
@@ -332,20 +325,11 @@ class FrankaBaseEnv(DirectRLEnv):
         # compute gripper joint targets
         gripper_targets = self.robot.data.joint_pos[
             :, self.gripper_dof_index : self.gripper_dof_index + 1
-        ]
-        gripper_targets = gripper_targets + (
-            self.actions[:, -1:]
-            * self.cfg.gripper_action_scale
-            * self.dt
-        )
+        ] + self.actions[:, -1:] * self.cfg.gripper_action_scale * self.dt
         gripper_targets = torch.clamp(
             gripper_targets,
-            self.robot_dof_lower_limits[
-                :, self.gripper_dof_index : self.gripper_dof_index + 1
-            ],
-            self.robot_dof_upper_limits[
-                :, self.gripper_dof_index : self.gripper_dof_index + 1
-            ],
+            self.robot_dof_lower_limits[:, self.gripper_dof_index : self.gripper_dof_index + 1],
+            self.robot_dof_upper_limits[:, self.gripper_dof_index : self.gripper_dof_index + 1],
         )
 
         self.robot_dof_targets[:, self.arm_dof_indices] = torch.clamp(
