@@ -21,3 +21,14 @@ gym.register(
         ),
     },
 )
+
+gym.register(
+    id="Phy-Franka-Push-Direct-v0",
+    entry_point="phy.franka_push:FrankaPushEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": "phy.cfg.franka_push_env_cfg:FrankaPushEnvCfg",
+        "rl_games_cfg_entry_point": "phy.cfg:franka_push_ppo.yaml",
+        "rl_games_lstm_cfg_entry_point": "phy.cfg:franka_push_ppo_lstm.yaml",
+    },
+)
