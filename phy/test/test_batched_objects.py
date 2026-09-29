@@ -159,6 +159,12 @@ def test_recorded_poses_are_snapshots_and_keep_environment_axis(count, tmp_path)
     gen.grasp_pose_w = gen.pregrasp_pose_w = pose.clone()
     gen.grasp_indices = [0] * count
     before = pose.numpy().copy()
+    gen.initial_joint_pos = np.zeros((count, 8), dtype=np.float32)
+    gen.initial_joint_vel = np.zeros((count, 8), dtype=np.float32)
+    gen.initial_robot_root_pose = before.copy()
+    gen.initial_object_state = np.concatenate(
+        (before, np.zeros((count, 6), dtype=np.float32)), axis=1
+    )
     gen.record_step(pose.clone(), 0)
     pose[:, 2] += 0.1
     gen.record_step(pose.clone(), 2)
@@ -171,4 +177,5 @@ def test_recorded_poses_are_snapshots_and_keep_environment_axis(count, tmp_path)
             np.testing.assert_array_equal(demo["obs/object_pose"][0], before[i])
             np.testing.assert_array_equal(demo["obs/object_pose"][1], pose[i].numpy())
             np.testing.assert_array_equal(demo["object_pose"][:], pose[i].numpy())
+            np.testing.assert_array_equal(demo["initial_object_state"][:7], before[i])
             assert demo.attrs["asset_id"] == f"asset_{i}"
