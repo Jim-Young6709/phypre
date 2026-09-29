@@ -355,6 +355,10 @@ class FrankaTableDatagen:
         """Record the reach, close, and lift phases for the batch."""
         env = self.env
         cfg = self.cfg
+        self.initial_joint_pos = env.robot.data.joint_pos.detach().cpu().numpy().astype(np.float32)
+        self.initial_joint_vel = env.robot.data.joint_vel.detach().cpu().numpy().astype(np.float32)
+        self.initial_robot_root_pose = env.robot.data.root_pose_w.detach().cpu().numpy().astype(np.float32)
+        self.initial_object_state = env.object.data.root_state_w.detach().cpu().numpy().astype(np.float32)
         self.buffer: TrajectoryBuffer = defaultdict(list)
         self.video_names = []
         for env_id, asset in enumerate(env.selected_assets):
@@ -446,6 +450,11 @@ class FrankaTableDatagen:
         group = self.h5_file.require_group("data").create_group(
             f"demo_{demo_id}"
         )
+        for key in (
+            "initial_joint_pos", "initial_joint_vel",
+            "initial_robot_root_pose", "initial_object_state",
+        ):
+            group.create_dataset(key, data=getattr(self, key)[env_id])
         for key in (
             "actions",
             "target_eef_pose",
